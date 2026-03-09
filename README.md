@@ -1,11 +1,12 @@
 # PDF Editor
 
-A command-line tool for rotating pages in PDF files and merging multiple PDFs. Easily rotate specific pages by 90, 180, or 270 degrees clockwise, or combine multiple PDF files into one.
+A command-line tool for rotating pages in PDF files, merging multiple PDFs, and converting PDFs to Word DOCX format. Easily rotate specific pages by 90, 180, or 270 degrees clockwise, combine multiple PDF files into one, or convert PDFs to editable Word documents.
 
 ## Features
 
 - **Rotate specific pages** in PDF files (90, 180, or 270 degrees clockwise)
 - **Merge multiple PDF files** into a single document
+- **Convert PDF files to Word DOCX format** for editing
 - Easy-to-use command-line interface with subcommands
 - Preserves original files (output saved to new files)
 
@@ -13,6 +14,7 @@ A command-line tool for rotating pages in PDF files and merging multiple PDFs. E
 
 - Python 3.x
 - pypdf library
+- pdf2docx library (for PDF to DOCX conversion)
 
 ## Installation
 
@@ -103,6 +105,32 @@ pdf-editor merge report.pdf appendix.pdf complete_report.pdf
 python -m pdf_editor merge chapter1.pdf chapter2.pdf book.pdf
 ```
 
+### Converting PDFs to DOCX
+
+**Command structure:**
+```bash
+python -m pdf_editor convert <input_pdf> <output_docx>
+# or
+pdf-editor convert <input_pdf> <output_docx>
+```
+
+**Arguments:**
+- **input_pdf**: Path to the input PDF file (required)
+- **output_docx**: Path where the DOCX file will be saved (required)
+
+**Examples:**
+
+**Convert a PDF to Word format:**
+```bash
+python -m pdf_editor convert document.pdf document.docx
+pdf-editor convert document.pdf document.docx
+```
+
+**Convert a scanned document:**
+```bash
+python -m pdf_editor convert scanned.pdf editable.docx
+```
+
 ### Getting Help
 
 **General help:**
@@ -121,11 +149,17 @@ python -m pdf_editor rotate --help
 python -m pdf_editor merge --help
 ```
 
+**Help for convert command:**
+```bash
+python -m pdf_editor convert --help
+```
+
 ## Important Notes
 
 - **Page numbers use 1-based indexing** (the first page is 1, not 0)
 - **Rotation is always clockwise**
 - **Merging preserves page order** - pages from the first file come first, followed by pages from the second file
+- **PDF to DOCX conversion** preserves text, formatting, and layout as much as possible, but image-based PDFs may have lower quality
 - **Original PDF files are never modified** - all operations create new output files
 - **If output file exists, it will be overwritten**
 - **Ensure you have read permissions** for input PDFs and **write permissions** for the output directory
@@ -148,6 +182,16 @@ python -m pdf_editor merge report_main.pdf report_appendix.pdf final_report.pdf
 
 # Create a complete book from chapters
 python -m pdf_editor merge intro.pdf chapter1.pdf chapter2.pdf conclusion.pdf complete_book.pdf
+```
+
+### Converting PDFs
+```bash
+# Convert a PDF report to editable Word format
+python -m pdf_editor convert report.pdf report.docx
+
+# Make a scanned document editable
+python -m pdf_editor convert scanned_contract.pdf editable_contract.docx
+```
 ```
 
 ## Troubleshooting

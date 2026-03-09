@@ -2,13 +2,13 @@
 
 import argparse
 import sys
-from .pdf_operations import merge_pdfs, rotate_pdf_pages
+from .pdf_operations import merge_pdfs, rotate_pdf_pages, convert_pdf_to_docx
 
 
 def main() -> None:
     """Main entry point for the PDF Editor CLI."""
     parser = argparse.ArgumentParser(
-        description="PDF Editor - Rotate pages or merge PDF files",
+        description="PDF Editor - Rotate pages, merge PDF files, or convert to DOCX",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -93,6 +93,36 @@ NOTES:
         help="Path to save the merged PDF file"
     )
 
+    # Convert command
+    convert_parser = subparsers.add_parser(
+        'convert',
+        help='Convert a PDF file to Word DOCX format',
+        description="Convert a PDF file to Microsoft Word DOCX format.",
+        epilog="""
+EXAMPLES:
+  Convert a PDF to DOCX:
+    python -m pdf_editor convert document.pdf document.docx
+
+  Convert a scanned PDF (may have lower quality):
+    python -m pdf_editor convert scanned.pdf scanned.docx
+
+NOTES:
+  - The conversion preserves text, formatting, and layout as much as possible
+  - Image-based PDFs may have lower conversion quality
+  - The original PDF file is not modified
+  - If output file exists, it will be overwritten
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    convert_parser.add_argument(
+        "input_pdf",
+        help="Path to the input PDF file"
+    )
+    convert_parser.add_argument(
+        "output_docx",
+        help="Path to save the output DOCX file"
+    )
+
     args = parser.parse_args()
 
     if args.command == 'rotate':
@@ -109,6 +139,10 @@ NOTES:
     elif args.command == 'merge':
         # Call the merge function
         merge_pdfs(args.file1, args.file2, args.output_pdf)
+
+    elif args.command == 'convert':
+        # Call the convert function
+        convert_pdf_to_docx(args.input_pdf, args.output_docx)
 
     else:
         parser.print_help()

@@ -1,11 +1,12 @@
 [project]
 name = "pdf-editor"
 version = "0.1.0"
-description = "A command-line tool for rotating and merging PDF files"
+description = "A command-line tool for rotating, merging, and converting PDF files"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pypdf>=4.0.0",
+    "pdf2docx>=0.5.0",
 ]
 
 [project.optional-dependencies]

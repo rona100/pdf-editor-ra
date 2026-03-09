@@ -1,6 +1,7 @@
 """PDF operations module for rotating and merging PDF files."""
 
 from pypdf import PdfReader, PdfWriter
+from pdf2docx import Converter
 
 
 def merge_pdfs(file1_path: str, file2_path: str, output_path: str) -> None:
@@ -61,3 +62,23 @@ def rotate_pdf_pages(input_path: str, output_path: str, pages_to_rotate: list[in
             writer.write(pdf_out_file)
 
     print(f"Successfully rotated pages {pages_to_rotate} of '{input_path}' by {rotation_angle} degrees and saved as '{output_path}'")
+
+
+def convert_pdf_to_docx(input_path: str, output_path: str) -> None:
+    """
+    Converts a PDF file to a Word DOCX document.
+
+    Args:
+        input_path (str): Path to the input PDF file
+        output_path (str): Path to save the output DOCX file
+    """
+    # Create converter object
+    cv = Converter(input_path)
+
+    # Convert PDF to DOCX
+    cv.convert(output_path, start=0, end=None)
+
+    # Close the converter
+    cv.close()
+
+    print(f"Successfully converted '{input_path}' to DOCX format and saved as '{output_path}'")

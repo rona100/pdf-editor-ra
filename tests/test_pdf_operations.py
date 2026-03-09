@@ -5,7 +5,7 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 # Import the functions to test
-from pdf_editor.pdf_operations import rotate_pdf_pages, merge_pdfs
+from pdf_editor.pdf_operations import rotate_pdf_pages, merge_pdfs, convert_pdf_to_docx
 
 
 class TestPDFOperations:
@@ -178,6 +178,31 @@ class TestPDFOperations:
                     assert len(reader.pages) == 2
 
                 os.unlink(output_pdf)
+
+        finally:
+            os.unlink(input_pdf)
+
+
+    def test_convert_pdf_to_docx(self):
+        """Test converting a PDF to DOCX format."""
+        # Create a test PDF
+        input_pdf = self.create_test_pdf(pages=2)
+
+        try:
+            # Create output file
+            output_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+
+            # Convert PDF to DOCX
+            convert_pdf_to_docx(input_pdf, output_docx)
+
+            # Verify the output file exists
+            assert os.path.exists(output_docx)
+
+            # Verify it's a DOCX file (check file size > 0)
+            assert os.path.getsize(output_docx) > 0
+
+            # Clean up
+            os.unlink(output_docx)
 
         finally:
             os.unlink(input_pdf)
