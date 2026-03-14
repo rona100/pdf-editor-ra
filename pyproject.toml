@@ -35,5 +35,10 @@ test-cov = "pytest --cov=src.pdf_editor --cov-report=term-missing {args}"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pdf_editor"]

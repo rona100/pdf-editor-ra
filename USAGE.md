@@ -2,7 +2,7 @@
 
 ## Overview
 
-This PDF Editor is a command-line tool that allows you to rotate specific pages in PDF files by 90, 180, or 270 degrees, and merge multiple PDF files into one.
+This PDF Editor is a command-line tool that allows you to rotate specific pages in PDF files by 90, 180, or 270 degrees, merge multiple PDF files into one, and reorder pages using simple swap specifications.
 
 ## Requirements
 
@@ -58,6 +58,22 @@ pdf-editor merge <file1> <file2> <output_pdf>
 - **file2** (required): Path to the second PDF file
 - **output_pdf** (required): Path where the merged PDF will be saved
 
+### Reordering Pages
+
+**Command structure:**
+```bash
+python -m pdf_editor order <input_pdf> <output_pdf> <num_pages> <new_order>
+# or
+pdf-editor order <input_pdf> <output_pdf> <num_pages> <new_order>
+```
+
+### Arguments
+
+- **input_pdf** (required): Path to the input PDF file
+- **output_pdf** (required): Path where the reordered PDF will be saved
+- **num_pages** (required): Number of pages to reorder from the beginning of the PDF
+- **new_order** (required): New order as comma-separated list specifying which original page goes to each position
+
 ## Examples
 
 ### Example 1: Rotate pages 1 and 2 by 180 degrees
@@ -91,6 +107,23 @@ pdf-editor merge report.pdf appendix.pdf complete_report.pdf
 ```bash
 python -m pdf_editor merge chapter1.pdf chapter2.pdf book.pdf
 ```
+
+### Example 6: Reorder pages by specifying position mappings
+
+```bash
+python -m pdf_editor order document.pdf reordered.pdf 6 '1,3,2,5,4,6'
+pdf-editor order document.pdf reordered.pdf 6 '1,3,2,5,4,6'
+```
+
+*This means: position 1 gets original page 1, position 2 gets original page 3, position 3 gets original page 2, position 4 gets original page 5, position 5 gets original page 4, position 6 gets original page 6*
+
+### Example 7: Reorder first 4 pages in reverse order
+
+```bash
+python -m pdf_editor order document.pdf reordered.pdf 4 '4,3,2,1'
+```
+
+*This means: position 1 gets original page 4, position 2 gets original page 3, position 3 gets original page 2, position 4 gets original page 1*
 
 ## Help
 

@@ -2,13 +2,13 @@
 
 import argparse
 import sys
-from .pdf_operations import merge_pdfs, rotate_pdf_pages, convert_pdf_to_docx
+from .pdf_operations import merge_pdfs, rotate_pdf_pages, convert_pdf_to_docx, order_pdf_pages
 
 
 def main() -> None:
     """Main entry point for the PDF Editor CLI."""
     parser = argparse.ArgumentParser(
-        description="PDF Editor - Rotate pages, merge PDF files, or convert to DOCX",
+        description="PDF Editor - Rotate pages, merge PDF files, reorder pages, or convert to DOCX",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -58,6 +58,51 @@ NOTES:
         default=180,
         choices=[90, 180, 270],
         help="Rotation angle in degrees (default: 180)"
+    )
+
+    # Order command
+    order_parser = subparsers.add_parser(
+        'order',
+        help='Reorder pages in a PDF file',
+        description="Reorder the first N pages of a PDF file according to a specified order.",
+        epilog="""
+EXAMPLES:
+  Reorder first 6 pages as 1,3,2,5,4,6:
+    python -m pdf_editor order input.pdf output.pdf 6 '1,3,2,5,4,6'
+    # This means: position 1 ← original page 1, position 2 ← original page 3,
+    # position 3 ← original page 2, position 4 ← original page 5,
+    # position 5 ← original page 4, position 6 ← original page 6
+
+  Reorder first 4 pages as 4,1,3,2:
+    python -m pdf_editor order input.pdf output.pdf 4 '4,1,3,2'
+    # This means: position 1 ← original page 4, position 2 ← original page 1,
+    # position 3 ← original page 3, position 4 ← original page 2
+
+NOTES:
+  - Page numbers use 1-based indexing (first page is 1, not 0)
+  - The new_order must contain each number from 1 to num_pages exactly once
+  - Pages beyond num_pages remain in their original order
+  - The original PDF is not modified; output is saved to a new file
+  - If output file exists, it will be overwritten
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    order_parser.add_argument(
+        "input_pdf",
+        help="Path to the input PDF file"
+    )
+    order_parser.add_argument(
+        "output_pdf",
+        help="Path to save the output PDF file"
+    )
+    order_parser.add_argument(
+        "num_pages",
+        type=int,
+        help="Number of pages to reorder from the beginning of the PDF"
+    )
+    order_parser.add_argument(
+        "new_order",
+        help="New order as comma-separated list specifying which original page goes to each position (e.g., '1,3,2,5,4,6' means position 1 gets original page 1, position 2 gets original page 3, etc.)"
     )
 
     # Merge command
@@ -135,6 +180,10 @@ NOTES:
 
         # Call the rotate function
         rotate_pdf_pages(args.input_pdf, args.output_pdf, pages_to_rotate, args.angle)
+
+    elif args.command == 'order':
+        # Call the order function
+        order_pdf_pages(args.input_pdf, args.output_pdf, args.num_pages, args.new_order)
 
     elif args.command == 'merge':
         # Call the merge function

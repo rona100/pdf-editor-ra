@@ -1,11 +1,12 @@
 # PDF Editor
 
-A command-line tool for rotating pages in PDF files, merging multiple PDFs, and converting PDFs to Word DOCX format. Easily rotate specific pages by 90, 180, or 270 degrees clockwise, combine multiple PDF files into one, or convert PDFs to editable Word documents.
+A command-line tool for rotating pages in PDF files, merging multiple PDFs, reordering pages, and converting PDFs to Word DOCX format. Easily rotate specific pages by 90, 180, or 270 degrees clockwise, combine multiple PDF files into one, reorder pages with simple swap specifications, or convert PDFs to editable Word documents.
 
 ## Features
 
 - **Rotate specific pages** in PDF files (90, 180, or 270 degrees clockwise)
 - **Merge multiple PDF files** into a single document
+- **Reorder pages** in PDF files using simple swap specifications
 - **Convert PDF files to Word DOCX format** for editing
 - Easy-to-use command-line interface with subcommands
 - Preserves original files (output saved to new files)
@@ -77,6 +78,35 @@ python -m pdf_editor rotate original.pdf rotated.pdf 3,5,7 --angle 90
 ```bash
 python -m pdf_editor rotate original.pdf rotated.pdf 10 -a 270
 ```
+
+### Reordering Pages
+
+**Command structure:**
+```bash
+python -m pdf_editor order <input_pdf> <output_pdf> <num_pages> <new_order>
+# or
+pdf-editor order <input_pdf> <output_pdf> <num_pages> <new_order>
+```
+
+**Arguments:**
+- **input_pdf**: Path to the input PDF file (required)
+- **output_pdf**: Path where the reordered PDF will be saved (required)
+- **num_pages**: Number of pages to reorder from the beginning of the PDF (required)
+- **new_order**: New order as comma-separated list specifying which original page goes to each position (required, e.g., '1,3,2,5,4,6')
+
+**Examples:**
+
+**Reorder first 6 pages as 1,3,2,5,4,6:**
+```bash
+python -m pdf_editor order input.pdf output.pdf 6 '1,3,2,5,4,6'
+```
+*This means position 1 gets original page 1, position 2 gets original page 3, position 3 gets original page 2, etc.*
+
+**Reorder first 4 pages as 4,1,3,2:**
+```bash
+python -m pdf_editor order input.pdf output.pdf 4 '4,1,3,2'
+```
+*This means position 1 gets original page 4, position 2 gets original page 1, position 3 gets original page 3, position 4 gets original page 2.*
 
 ### Merging PDFs
 
@@ -154,10 +184,17 @@ python -m pdf_editor merge --help
 python -m pdf_editor convert --help
 ```
 
+**Help for order command:**
+```bash
+python -m pdf_editor order --help
+```
+
 ## Important Notes
 
 - **Page numbers use 1-based indexing** (the first page is 1, not 0)
 - **Rotation is always clockwise**
+- **Reordering affects only the first N pages** - pages beyond num_pages remain in original order
+- **New order must be a permutation** - must contain each number from 1 to num_pages exactly once
 - **Merging preserves page order** - pages from the first file come first, followed by pages from the second file
 - **PDF to DOCX conversion** preserves text, formatting, and layout as much as possible, but image-based PDFs may have lower quality
 - **Original PDF files are never modified** - all operations create new output files
@@ -166,13 +203,13 @@ python -m pdf_editor convert --help
 
 ## Example Workflows
 
-### Rotating Pages
+### Reordering Pages
 ```bash
-# Fix upside-down pages in a scanned document
-python -m pdf_editor rotate scanned.pdf fixed.pdf 1,3,5
+# Rearrange the first 6 pages: position 1←page 1, position 2←page 3, position 3←page 2, etc.
+python -m pdf_editor order document.pdf reordered.pdf 6 '1,3,2,5,4,6'
 
-# Rotate landscape pages to portrait
-python -m pdf_editor rotate document.pdf adjusted.pdf 2,4,6 --angle 90
+# Reorder first 4 pages in reverse order
+python -m pdf_editor order document.pdf reordered.pdf 4 '4,3,2,1'
 ```
 
 ### Merging PDFs

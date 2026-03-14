@@ -5,7 +5,7 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 # Import the functions to test
-from pdf_editor.pdf_operations import rotate_pdf_pages, merge_pdfs, convert_pdf_to_docx
+from pdf_editor.pdf_operations import rotate_pdf_pages, merge_pdfs, convert_pdf_to_docx, order_pdf_pages
 
 
 class TestPDFOperations:
@@ -203,6 +203,59 @@ class TestPDFOperations:
 
             # Clean up
             os.unlink(output_docx)
+
+        finally:
+            os.unlink(input_pdf)
+
+
+    def test_order_pdf_pages(self):
+        """Test reordering pages in a PDF."""
+        # Create a test PDF with 6 pages
+        input_pdf = self.create_test_pdf(pages=6)
+
+        try:
+            # Create output file
+            output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+
+            # Reorder first 6 pages as 1,3,2,5,4,6
+            order_pdf_pages(input_pdf, output_pdf, 6, '1,3,2,5,4,6')
+
+            # Verify the output file exists
+            assert os.path.exists(output_pdf)
+
+            # Verify the PDF has the correct number of pages
+            with open(output_pdf, 'rb') as f:
+                reader = PdfReader(f)
+                assert len(reader.pages) == 6
+
+            # Clean up
+            os.unlink(output_pdf)
+
+        finally:
+            os.unlink(input_pdf)
+
+    def test_order_pdf_pages_partial(self):
+        """Test reordering only some pages in a PDF."""
+        # Create a test PDF with 8 pages
+        input_pdf = self.create_test_pdf(pages=8)
+
+        try:
+            # Create output file
+            output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+
+            # Reorder first 4 pages as 4,1,3,2, leave last 4 unchanged
+            order_pdf_pages(input_pdf, output_pdf, 4, '4,1,3,2')
+
+            # Verify the output file exists
+            assert os.path.exists(output_pdf)
+
+            # Verify the PDF has the correct number of pages
+            with open(output_pdf, 'rb') as f:
+                reader = PdfReader(f)
+                assert len(reader.pages) == 8
+
+            # Clean up
+            os.unlink(output_pdf)
 
         finally:
             os.unlink(input_pdf)
