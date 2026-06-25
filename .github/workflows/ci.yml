@@ -23,7 +23,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv pip install -e ".[web,dev]"
+        run: uv pip install --system -e ".[web,dev]"
 
       - name: Run tests
         run: uv run pytest -v
