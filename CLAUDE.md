@@ -111,18 +111,20 @@ uv run pytest tests/test_pdf_operations.py::TestPDFOperations::test_rotate_pdf_p
 ### Building and Running via Docker
 
 ```bash
-# Build
-docker build -t pdf-editor .
-
-# Run
-docker run -p 8000:8000 pdf-editor
-# Open http://localhost:8000
-```
-
-Or use docker-compose:
-```bash
+# Build and run with docker-compose (recommended)
 docker-compose up --build
+# Open http://localhost:8000
+
+# Or build and run manually
+docker build -t pdf-editor .
+docker run -p 8000:8000 -e FRONTEND_DIST=/app/frontend/dist pdf-editor
 ```
+
+Key Dockerfile requirements (learned from debugging):
+- `src/` must be copied **before** `uv pip install` (editable install needs sources present)
+- Use `npm install` not `npm ci` (no `package-lock.json` in repo)
+- `README.md` must be copied alongside `pyproject.toml` (hatchling requires it)
+- Use editable install (`-e`) so `__file__`-relative path resolution works at runtime
 
 ### Frontend Build
 
@@ -225,3 +227,4 @@ Error handling: validation errors return 422; server errors return 500 with mess
 - The project requires Python 3.13+ as specified in `pyproject.toml`
 - Frontend requires Node.js 18+ for development (npm/npx)
 - Dual-mode entry point in `__main__.py` checks for "serve" argument before routing to CLI
+- `app.py` resolves `frontend/dist` via `FRONTEND_DIST` env var (set in docker-compose); falls back to `__file__`-relative path for local dev with editable install

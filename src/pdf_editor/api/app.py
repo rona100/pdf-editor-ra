@@ -17,7 +17,12 @@ def create_app() -> FastAPI:
 
     app.include_router(router, prefix="/api")
 
-    frontend_build = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+    import os
+    frontend_dist_env = os.environ.get("FRONTEND_DIST")
+    if frontend_dist_env:
+        frontend_build = Path(frontend_dist_env)
+    else:
+        frontend_build = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
     if frontend_build.exists():
         app.mount("/", StaticFiles(directory=str(frontend_build), html=True), name="static")
 
