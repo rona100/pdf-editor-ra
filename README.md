@@ -125,10 +125,17 @@ curl -X POST http://localhost:8000/api/rotate \
 
 ## Testing
 
+**Backend (Python):**
 ```bash
 uv run pytest
 uv run pytest -v
 uv run pytest --cov=pdf_editor --cov-report=term-missing
+```
+
+**Frontend (Node.js required):**
+```bash
+cd frontend && npm test
+cd frontend && npm run test:coverage
 ```
 
 ## Notes

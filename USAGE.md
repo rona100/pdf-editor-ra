@@ -284,10 +284,10 @@ npm run preview
 
 ## Testing
 
-Run the test suite to verify functionality:
+### Backend (Python)
 
 ```bash
-# All tests
+# All tests (operations + API + CLI integration)
 uv run pytest
 
 # Verbose output
@@ -296,12 +296,25 @@ uv run pytest -v
 # With coverage report
 uv run pytest --cov=pdf_editor --cov-report=term-missing
 
-# Specific test file
-uv run pytest tests/test_pdf_operations.py
+# Specific test files
+uv run pytest tests/test_pdf_operations.py   # PDF operation unit tests
+uv run pytest tests/test_api.py              # FastAPI endpoint tests
+uv run pytest tests/test_cli.py             # CLI integration tests
 
 # Specific test
-uv run pytest tests/test_pdf_operations.py::TestPDFOperations::test_rotate_pdf_pages
+uv run pytest tests/test_pdf_operations.py::TestPDFOperations::test_rotate_pdf_pages_single_page
 ```
+
+### Frontend (Node.js required)
+
+```bash
+cd frontend
+npm test                  # single-pass run (vitest)
+npm run test:watch        # watch mode for development
+npm run test:coverage     # with v8 coverage report
+```
+
+Frontend tests use Vitest + React Testing Library and cover the App component, FileDropzone, OperationResult, and the `useOperation` hook.
 
 ---
 
