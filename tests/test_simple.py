@@ -26,31 +26,17 @@ def create_test_pdf(pages=3):
 
 
 def test_rotate():
-    """Test PDF rotation functionality."""
-    print("Testing PDF rotation...")
-
-    # Create test PDF
     input_pdf = create_test_pdf(pages=3)
     output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
 
     try:
-        # Test rotating page 2 by 90 degrees
         rotate_pdf_pages(input_pdf, output_pdf, [2], 90)
 
-        # Verify result
         with open(output_pdf, 'rb') as f:
             reader = PdfReader(f)
             assert len(reader.pages) == 3
 
-        print("✓ Rotation test passed")
-        return True
-
-    except Exception as e:
-        print(f"✗ Rotation test failed: {e}")
-        return False
-
     finally:
-        # Cleanup
         if os.path.exists(input_pdf):
             os.unlink(input_pdf)
         if os.path.exists(output_pdf):
@@ -58,32 +44,18 @@ def test_rotate():
 
 
 def test_merge():
-    """Test PDF merging functionality."""
-    print("Testing PDF merging...")
-
-    # Create test PDFs
     pdf1 = create_test_pdf(pages=2)
     pdf2 = create_test_pdf(pages=3)
     output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
 
     try:
-        # Test merging
         merge_pdfs(pdf1, pdf2, output_pdf)
 
-        # Verify result
         with open(output_pdf, 'rb') as f:
             reader = PdfReader(f)
-            assert len(reader.pages) == 5  # 2 + 3 pages
-
-        print("✓ Merge test passed")
-        return True
-
-    except Exception as e:
-        print(f"✗ Merge test failed: {e}")
-        return False
+            assert len(reader.pages) == 5
 
     finally:
-        # Cleanup
         for pdf in [pdf1, pdf2, output_pdf]:
             if os.path.exists(pdf):
                 os.unlink(pdf)
