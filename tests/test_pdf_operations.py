@@ -236,29 +236,124 @@ class TestPDFOperations:
 
     def test_order_pdf_pages_partial(self):
         """Test reordering only some pages in a PDF."""
-        # Create a test PDF with 8 pages
         input_pdf = self.create_test_pdf(pages=8)
-
         try:
-            # Create output file
             output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
-
-            # Reorder first 4 pages as 4,1,3,2, leave last 4 unchanged
             order_pdf_pages(input_pdf, output_pdf, 4, '4,1,3,2')
-
-            # Verify the output file exists
             assert os.path.exists(output_pdf)
-
-            # Verify the PDF has the correct number of pages
             with open(output_pdf, 'rb') as f:
                 reader = PdfReader(f)
                 assert len(reader.pages) == 8
-
-            # Clean up
             os.unlink(output_pdf)
-
         finally:
             os.unlink(input_pdf)
+
+    def test_rotate_verifies_rotation_metadata(self):
+        """Verify rotated pages have the correct rotation value in PDF metadata."""
+        input_pdf = self.create_test_pdf(pages=3)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            rotate_pdf_pages(input_pdf, output_pdf, [1, 3], 90)
+            with open(output_pdf, 'rb') as f:
+                reader = PdfReader(f)
+                assert reader.pages[0].rotation == 90
+                assert reader.pages[1].rotation == 0
+                assert reader.pages[2].rotation == 90
+            os.unlink(output_pdf)
+        finally:
+            os.unlink(input_pdf)
+
+    def test_rotate_270_degrees_metadata(self):
+        """Verify 270-degree rotation is stored correctly in PDF metadata."""
+        input_pdf = self.create_test_pdf(pages=2)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            rotate_pdf_pages(input_pdf, output_pdf, [2], 270)
+            with open(output_pdf, 'rb') as f:
+                reader = PdfReader(f)
+                assert reader.pages[0].rotation == 0
+                assert reader.pages[1].rotation == 270
+            os.unlink(output_pdf)
+        finally:
+            os.unlink(input_pdf)
+
+    def test_order_raises_when_num_pages_exceeds_total(self):
+        """order_pdf_pages raises ValueError when num_pages > total pages."""
+        input_pdf = self.create_test_pdf(pages=3)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            with pytest.raises(ValueError, match="only has"):
+                order_pdf_pages(input_pdf, output_pdf, 5, '1,2,3,4,5')
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    def test_order_raises_when_order_has_wrong_count(self):
+        """order_pdf_pages raises ValueError when new_order length != num_pages."""
+        input_pdf = self.create_test_pdf(pages=4)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            with pytest.raises(ValueError, match="exactly"):
+                order_pdf_pages(input_pdf, output_pdf, 4, '1,2,3')
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    def test_order_raises_when_order_has_duplicates(self):
+        """order_pdf_pages raises ValueError when new_order contains duplicate pages."""
+        input_pdf = self.create_test_pdf(pages=4)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            with pytest.raises(ValueError, match="exactly once"):
+                order_pdf_pages(input_pdf, output_pdf, 4, '1,1,3,4')
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    def test_order_raises_when_order_not_integers(self):
+        """order_pdf_pages raises ValueError when new_order contains non-integers."""
+        input_pdf = self.create_test_pdf(pages=3)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            with pytest.raises(ValueError, match="Invalid new_order"):
+                order_pdf_pages(input_pdf, output_pdf, 3, 'a,b,c')
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    def test_convert_output_is_valid_docx(self):
+        """Verify convert_pdf_to_docx produces a valid, openable DOCX file."""
+        from docx import Document
+        input_pdf = self.create_test_pdf(pages=1)
+        output_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        try:
+            convert_pdf_to_docx(input_pdf, output_docx)
+            doc = Document(output_docx)
+            assert doc is not None
+            os.unlink(output_docx)
+        finally:
+            os.unlink(input_pdf)
+
+    def test_merge_preserves_all_pages_accessible(self):
+        """Verify every page of a merged PDF is accessible."""
+        pdf1 = self.create_test_pdf(pages=3)
+        pdf2 = self.create_test_pdf(pages=2)
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            merge_pdfs(pdf1, pdf2, output_pdf)
+            with open(output_pdf, 'rb') as f:
+                reader = PdfReader(f)
+                assert len(reader.pages) == 5
+                for page in reader.pages:
+                    assert page is not None
+            os.unlink(output_pdf)
+        finally:
+            os.unlink(pdf1)
+            os.unlink(pdf2)
 
 
 if __name__ == "__main__":

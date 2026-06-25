@@ -22,13 +22,13 @@ def main() -> None:
         epilog="""
 EXAMPLES:
   Rotate pages 1 and 2 by 180 degrees (default):
-    python -m pdf_editor rotate original.pdf rotated.pdf 1,2
+    python -m pdf_editor rotate original.pdf 1,2 -o rotated.pdf
 
   Rotate pages 3, 5, and 7 by 90 degrees clockwise:
-    python -m pdf_editor rotate original.pdf rotated.pdf 3,5,7 --angle 90
+    python -m pdf_editor rotate original.pdf 3,5,7 --angle 90 -o output.pdf
 
   Rotate page 10 by 270 degrees clockwise:
-    python -m pdf_editor rotate original.pdf rotated.pdf 10 -a 270
+    python -m pdf_editor rotate original.pdf 10 -a 270
 
 NOTES:
   - Page numbers use 1-based indexing (first page is 1, not 0)
@@ -44,13 +44,15 @@ NOTES:
         help="Path to the input PDF file"
     )
     rotate_parser.add_argument(
-        "output_pdf",
-        help="Path to save the output PDF file"
-    )
-    rotate_parser.add_argument(
         "pages",
         type=str,
         help="Page numbers to rotate (comma-separated, e.g., 1,2,3)"
+    )
+    rotate_parser.add_argument(
+        "-o", "--output",
+        dest="output_pdf",
+        default="rotated.pdf",
+        help="Path to save the output PDF file (default: rotated.pdf)"
     )
     rotate_parser.add_argument(
         "-a", "--angle",
@@ -68,15 +70,10 @@ NOTES:
         epilog="""
 EXAMPLES:
   Reorder first 6 pages as 1,3,2,5,4,6:
-    python -m pdf_editor order input.pdf output.pdf 6 '1,3,2,5,4,6'
-    # This means: position 1 ← original page 1, position 2 ← original page 3,
-    # position 3 ← original page 2, position 4 ← original page 5,
-    # position 5 ← original page 4, position 6 ← original page 6
+    python -m pdf_editor order input.pdf 6 1,3,2,5,4,6 -o reordered.pdf
 
   Reorder first 4 pages as 4,1,3,2:
-    python -m pdf_editor order input.pdf output.pdf 4 '4,1,3,2'
-    # This means: position 1 ← original page 4, position 2 ← original page 1,
-    # position 3 ← original page 3, position 4 ← original page 2
+    python -m pdf_editor order input.pdf 4 4,1,3,2 -o reordered.pdf
 
 NOTES:
   - Page numbers use 1-based indexing (first page is 1, not 0)
@@ -92,17 +89,19 @@ NOTES:
         help="Path to the input PDF file"
     )
     order_parser.add_argument(
-        "output_pdf",
-        help="Path to save the output PDF file"
-    )
-    order_parser.add_argument(
         "num_pages",
         type=int,
         help="Number of pages to reorder from the beginning of the PDF"
     )
     order_parser.add_argument(
         "new_order",
-        help="New order as comma-separated list specifying which original page goes to each position (e.g., '1,3,2,5,4,6' means position 1 gets original page 1, position 2 gets original page 3, etc.)"
+        help="New order as comma-separated list (e.g., '1,3,2,5,4,6')"
+    )
+    order_parser.add_argument(
+        "-o", "--output",
+        dest="output_pdf",
+        default="reordered.pdf",
+        help="Path to save the output PDF file (default: reordered.pdf)"
     )
 
     # Merge command
@@ -113,10 +112,10 @@ NOTES:
         epilog="""
 EXAMPLES:
   Merge two PDF files:
-    python -m pdf_editor merge file1.pdf file2.pdf merged.pdf
+    python -m pdf_editor merge file1.pdf file2.pdf -o merged.pdf
 
   Combine a report with an appendix:
-    python -m pdf_editor merge report.pdf appendix.pdf complete_report.pdf
+    python -m pdf_editor merge report.pdf appendix.pdf -o complete_report.pdf
 
 NOTES:
   - Pages from the first PDF come first, followed by pages from the second PDF
@@ -134,8 +133,10 @@ NOTES:
         help="Path to the second PDF file"
     )
     merge_parser.add_argument(
-        "output_pdf",
-        help="Path to save the merged PDF file"
+        "-o", "--output",
+        dest="output_pdf",
+        default="merged.pdf",
+        help="Path to save the merged PDF file (default: merged.pdf)"
     )
 
     # Convert command
@@ -146,10 +147,10 @@ NOTES:
         epilog="""
 EXAMPLES:
   Convert a PDF to DOCX:
-    python -m pdf_editor convert document.pdf document.docx
+    python -m pdf_editor convert document.pdf -o document.docx
 
   Convert a scanned PDF (may have lower quality):
-    python -m pdf_editor convert scanned.pdf scanned.docx
+    python -m pdf_editor convert scanned.pdf -o scanned.docx
 
 NOTES:
   - The conversion preserves text, formatting, and layout as much as possible
@@ -164,33 +165,33 @@ NOTES:
         help="Path to the input PDF file"
     )
     convert_parser.add_argument(
-        "output_docx",
-        help="Path to save the output DOCX file"
+        "-o", "--output",
+        dest="output_docx",
+        default="converted.docx",
+        help="Path to save the output DOCX file (default: converted.docx)"
     )
 
     args = parser.parse_args()
 
     if args.command == 'rotate':
-        # Parse page numbers from comma-separated string
         try:
             pages_to_rotate = [int(p.strip()) for p in args.pages.split(",")]
         except ValueError:
             print("Error: Pages must be comma-separated integers (e.g., 1,2,3)")
             sys.exit(1)
-
-        # Call the rotate function
         rotate_pdf_pages(args.input_pdf, args.output_pdf, pages_to_rotate, args.angle)
 
     elif args.command == 'order':
-        # Call the order function
-        order_pdf_pages(args.input_pdf, args.output_pdf, args.num_pages, args.new_order)
+        try:
+            order_pdf_pages(args.input_pdf, args.output_pdf, args.num_pages, args.new_order)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
     elif args.command == 'merge':
-        # Call the merge function
         merge_pdfs(args.file1, args.file2, args.output_pdf)
 
     elif args.command == 'convert':
-        # Call the convert function
         convert_pdf_to_docx(args.input_pdf, args.output_docx)
 
     else:

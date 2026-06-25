@@ -50,24 +50,26 @@ pip install -e ".[web,dev]"
 ### Running the CLI
 
 ```bash
-# Rotate PDF
-python -m pdf_editor rotate input.pdf 1,2 90 -o output.pdf
+# Rotate PDF (pages then -o output)
+uv run python -m pdf_editor rotate input.pdf 1,2 -o output.pdf --angle 90
 
 # Merge PDFs
-python -m pdf_editor merge file1.pdf file2.pdf -o merged.pdf
+uv run python -m pdf_editor merge file1.pdf file2.pdf -o merged.pdf
 
-# Reorder pages
-python -m pdf_editor order input.pdf 4 1,3,2,5,4,6 -o reordered.pdf
+# Reorder pages (num_pages and new_order are positional, output is -o)
+uv run python -m pdf_editor order input.pdf 4 1,3,2,5,4,6 -o reordered.pdf
 
 # Convert to DOCX
-python -m pdf_editor convert input.pdf -o output.docx
+uv run python -m pdf_editor convert input.pdf -o output.docx
 ```
+
+All subcommands use `-o/--output` for the output path (default filenames: `rotated.pdf`, `merged.pdf`, `reordered.pdf`, `converted.docx`).
 
 ### Running the Web Server
 
 ```bash
 # Start FastAPI server on http://localhost:8000
-python -m pdf_editor serve
+uv run python -m pdf_editor serve
 
 # With auto-reload (development)
 uv run uvicorn pdf_editor.api.app:app --reload --host 0.0.0.0 --port 8000
@@ -88,25 +90,34 @@ cd frontend && npm install && npm run dev
 
 ### Running Tests
 
+**Backend (Python):**
 ```bash
-# All tests (CLI + API)
+# All tests (operations + API + CLI integration)
 uv run pytest
 
-# Tests with verbose output
+# Verbose output
 uv run pytest -v
 
-# Tests with coverage report
+# With coverage
 uv run pytest --cov=pdf_editor --cov-report=term-missing
 
-# Single test file
+# Specific file or test
 uv run pytest tests/test_pdf_operations.py
-
-# Only API tests
 uv run pytest tests/test_api.py
-
-# Single test function
+uv run pytest tests/test_cli.py
 uv run pytest tests/test_pdf_operations.py::TestPDFOperations::test_rotate_pdf_pages_single_page
 ```
+
+**Frontend (Node.js required):**
+```bash
+cd frontend
+npm install       # first time only
+npm test          # vitest run (single pass)
+npm run test:watch      # watch mode
+npm run test:coverage   # with coverage
+```
+
+Frontend tests use Vitest + React Testing Library. Config: `frontend/vitest.config.ts`. Setup: `frontend/src/test/setup.ts`.
 
 ### Building and Running via Docker
 
@@ -168,8 +179,10 @@ cd frontend && npm run preview
 - `.gitignore` — Includes `node_modules/`, `frontend/dist/`, `frontend/.vite/`
 
 **Tests**
-- `tests/test_pdf_operations.py` — CLI/PDF operation tests; use `create_test_pdf()` helper
-- `tests/test_api.py` — FastAPI endpoint tests; use `TestClient` from fastapi.testclient
+- `tests/test_pdf_operations.py` — Unit tests for all PDF operations; covers rotation metadata, order validation errors, DOCX validity
+- `tests/test_api.py` — FastAPI endpoint tests; covers success responses, page counts, 422/500 error cases, content-disposition headers
+- `tests/test_cli.py` — CLI integration tests via subprocess; covers all four subcommands end-to-end
+- `frontend/src/test/` — Vitest + React Testing Library frontend tests (App, FileDropzone, OperationResult, useOperation hook)
 
 ## Testing Patterns
 
@@ -177,12 +190,24 @@ cd frontend && npm run preview
 - Use `TestPDFOperations` class with `create_test_pdf()` helper that generates blank PDFs
 - Temporary files via `tempfile.NamedTemporaryFile` with automatic cleanup
 - Import directly from `pdf_editor.pdf_operations` (not `src.pdf_editor`)
+- Verify rotation via `page.rotation` in PDF metadata; verify DOCX output with `python-docx`
 
 **API Tests** (`tests/test_api.py`)
 - Use `TestClient` from `fastapi.testclient` (sync, no async needed)
 - Helper function `make_pdf_bytes(pages=2)` creates test PDFs with `PdfWriter`
-- Test multipart form data uploads and blob downloads
-- Assert response status codes (200 for success, 422 for validation errors)
+- Test multipart form data uploads and blob downloads; verify page counts via `PdfReader`
+- Assert status codes: 200 (success), 422 (missing/invalid fields), 500 (operation errors)
+
+**CLI Integration Tests** (`tests/test_cli.py`)
+- Use `subprocess.run([sys.executable, '-m', 'pdf_editor', ...])` to exercise the full arg-parsing chain
+- Helper `make_test_pdf()` creates temp PDFs; all temp files are cleaned up in `finally` blocks
+- Verify returncode == 0 for success, != 0 for invalid args/operations
+
+**Frontend Tests** (`frontend/src/test/`)
+- Vitest + React Testing Library; run with `npm test` in the `frontend/` directory
+- `URL.createObjectURL` and `revokeObjectURL` are stubbed in `setup.ts` (not in jsdom)
+- `useOperation` tests mock `fetch` with `vi.stubGlobal` to simulate success/error responses
+- Component tests use `@testing-library/user-event` for realistic user interactions
 
 ## Dependencies
 
