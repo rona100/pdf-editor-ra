@@ -1,6 +1,7 @@
 import pytest
 import shutil
 import tempfile
+import zipfile
 import os
 from pathlib import Path
 
@@ -563,12 +564,15 @@ stem = pathlib.Path(sys.argv[-1]).stem
         assert '-env:UserInstallation=file://' in recorded['argv']
         assert '--headless' in recorded['argv']
 
-    def test_missing_libreoffice_explains_how_to_install_it(self, monkeypatch):
+    def test_missing_libreoffice_explains_how_to_install_it(self, tmp_path, monkeypatch):
         monkeypatch.delenv('SOFFICE_BIN', raising=False)
         monkeypatch.setattr(pdf_operations.shutil, 'which', lambda _: None)
 
+        input_docx = tmp_path / 'source.docx'
+        self.make_docx(str(input_docx))
+
         with pytest.raises(RuntimeError, match='libreoffice-writer'):
-            convert_docx_to_pdf('input.docx', 'output.pdf')
+            convert_docx_to_pdf(str(input_docx), str(tmp_path / 'out.pdf'))
 
     @needs_soffice
     def test_converts_a_docx_to_a_readable_pdf(self):
@@ -602,16 +606,28 @@ stem = pathlib.Path(sys.argv[-1]).stem
             if os.path.exists(output_pdf):
                 os.unlink(output_pdf)
 
-    @needs_soffice
-    def test_rejects_a_file_that_is_not_a_document(self):
-        bogus = tempfile.NamedTemporaryFile(suffix='.docx', delete=False)
-        bogus.write(b'this is not a docx at all')
-        bogus.close()
-        try:
-            with pytest.raises(RuntimeError):
-                convert_docx_to_pdf(bogus.name, '/tmp/should-not-exist.pdf')
-        finally:
-            os.unlink(bogus.name)
+    def test_rejects_a_file_that_is_not_a_document(self, tmp_path):
+        """
+        LibreOffice would happily render these bytes as plain text and report
+        success, so the check has to happen before it is invoked.
+        """
+        bogus = tmp_path / 'bogus.docx'
+        bogus.write_bytes(b'this is not a docx at all')
+        output = tmp_path / 'out.pdf'
+
+        with pytest.raises(ValueError, match='not a Word document'):
+            convert_docx_to_pdf(str(bogus), str(output))
+        assert not output.exists()
+
+    def test_rejects_a_zip_that_is_not_a_document(self, tmp_path):
+        archive = tmp_path / 'archive.docx'
+        with zipfile.ZipFile(archive, 'w') as zf:
+            zf.writestr('hello.txt', 'not a document')
+        output = tmp_path / 'out.pdf'
+
+        with pytest.raises(ValueError, match='no word/document.xml'):
+            convert_docx_to_pdf(str(archive), str(output))
+        assert not output.exists()
 
 
 if __name__ == "__main__":

@@ -1,18 +1,22 @@
 """Right-to-left repair pass for a generated DOCX.
 
-NOT WORKING YET: see the note in rtl.py -- Hebrew output still does not render
-correctly in Word.
+See rtl.py for how this was verified against a real renderer.
 
 pdf2docx lays out tables, images and positioning faithfully but is entirely
 bidi-unaware: it emits no ``<w:bidi>`` or ``<w:rtl>`` properties at all, so Word
 re-runs its own bidi algorithm with a left-to-right base direction and renders
 Hebrew or Arabic paragraphs backwards. This module patches the converted
 document in place — substituting logical-order text from a correction table and
-marking paragraphs, runs and sections as right-to-left.
+marking the affected paragraphs and runs as right-to-left. Sections are left
+alone deliberately; see the note in apply_rtl().
 
-Paragraph alignment is deliberately left alone: pdf2docx derives ``w:jc`` from
-where the text actually sits on the page, and Word treats left/right as
-physical rather than direction-relative, so its choice is already correct.
+Paragraph geometry has to be mirrored when the direction flips. In OOXML,
+``w:jc``'s ``left``/``right`` and ``w:ind``'s ``@w:left``/``@w:right`` are the
+Transitional spellings of ``start``/``end`` — they are relative to the
+paragraph's own direction, not to the page. pdf2docx computes them from where
+text sits on the page assuming left-to-right, so adding ``<w:bidi/>`` silently
+reinterprets every one of them and mirrors the layout. Swapping left for right
+on the paragraphs we mark keeps the physical position pdf2docx intended.
 """
 
 from docx import Document
@@ -45,13 +49,6 @@ _RPR_SEQ = (
     "w:eastAsianLayout", "w:specVanish", "w:oMath",
 )
 
-_SECTPR_SEQ = (
-    "w:footnotePr", "w:endnotePr", "w:type", "w:pgSz", "w:pgMar", "w:paperSrc",
-    "w:pgBorders", "w:lnNumType", "w:pgNumType", "w:cols", "w:formProt",
-    "w:vAlign", "w:noEndnote", "w:titlePg", "w:textDirection", "w:bidi",
-    "w:rtlGutter", "w:docGrid", "w:printerSettings", "w:sectPrChange",
-)
-
 
 def _ensure_child(parent, tag: str, sequence: tuple[str, ...]):
     """
@@ -70,6 +67,50 @@ def _ensure_child(parent, tag: str, sequence: tuple[str, ...]):
     # insert_element_before() qualifies the successor names itself.
     parent.insert_element_before(child, *sequence[sequence.index(tag) + 1:])
     return child
+
+
+# Alignment values that have a mirror image. "center", "both" and "distribute"
+# look the same from either direction and are left alone.
+_MIRRORED_JC = {
+    "left": "right",
+    "right": "left",
+    "start": "end",
+    "end": "start",
+}
+
+# Indent attribute pairs that swap meaning with the paragraph's direction.
+_MIRRORED_IND = (("w:left", "w:right"), ("w:start", "w:end"))
+
+
+def _mirror_geometry(pPr) -> None:
+    """
+    Swaps left for right so a paragraph keeps its position once bidi is on.
+
+    Called only when `<w:bidi/>` is being added, since the reinterpretation
+    happens exactly once — mirroring an already-bidi paragraph would put it
+    back where it started.
+    """
+    alignment = pPr.find(qn("w:jc"))
+    if alignment is not None:
+        mirrored = _MIRRORED_JC.get(alignment.get(qn("w:val")))
+        if mirrored:
+            alignment.set(qn("w:val"), mirrored)
+
+    indent = pPr.find(qn("w:ind"))
+    if indent is None:
+        return
+
+    for near, far in _MIRRORED_IND:
+        near_value = indent.get(qn(near))
+        far_value = indent.get(qn(far))
+        if near_value is None and far_value is None:
+            continue
+
+        for attribute, value in ((near, far_value), (far, near_value)):
+            if value is None:
+                indent.attrib.pop(qn(attribute), None)
+            else:
+                indent.set(qn(attribute), value)
 
 
 def _repair_text(text_el, corrections: dict[str, str]) -> bool:
@@ -144,13 +185,20 @@ def apply_rtl(docx_path: str, corrections: dict[str, str] | None = None) -> dict
             omitted, only direction properties are applied.
 
     Returns:
-        dict: Counts of "paragraphs" marked RTL, "runs" marked RTL, plus
-        "text_fixed" and "text_unmatched". Note that "text_unmatched" also
-        counts runs that simply needed no correction, so it is an upper bound
-        on the misses rather than an exact count.
+        dict: Counts of "paragraphs" marked RTL, "runs" marked RTL,
+        "mirrored" paragraphs whose geometry was swapped, plus "text_fixed"
+        and "text_unmatched". Note that "text_unmatched" also counts runs that
+        simply needed no correction, so it is an upper bound on the misses
+        rather than an exact count.
     """
     corrections = corrections or {}
-    stats = {"paragraphs": 0, "runs": 0, "text_fixed": 0, "text_unmatched": 0}
+    stats = {
+        "paragraphs": 0,
+        "runs": 0,
+        "mirrored": 0,
+        "text_fixed": 0,
+        "text_unmatched": 0,
+    }
 
     document = Document(docx_path)
     body = document.element.body
@@ -181,13 +229,19 @@ def apply_rtl(docx_path: str, corrections: dict[str, str] | None = None) -> dict
             if pPr is None:
                 pPr = OxmlElement("w:pPr")
                 paragraph_el.insert(0, pPr)
+
+            already_bidi = pPr.find(qn("w:bidi")) is not None
             _ensure_child(pPr, "w:bidi", _PPR_SEQ)
+            if not already_bidi:
+                _mirror_geometry(pPr)
+                stats["mirrored"] += 1
             stats["paragraphs"] += 1
 
-    if stats["paragraphs"]:
-        # sectPr sits either directly under body or inside a paragraph's pPr.
-        for sectPr in body.iter(qn("w:sectPr")):
-            _ensure_child(sectPr, "w:bidi", _SECTPR_SEQ)
+    # Deliberately no <w:bidi/> on sectPr. It would make right-to-left the
+    # section default, which flips the geometry of the Latin-only paragraphs
+    # this pass leaves alone and never mirrors — moving numbers and Latin
+    # labels to the wrong side of the page. Marking each RTL paragraph
+    # individually, as above, is enough.
 
     document.save(docx_path)
     return stats

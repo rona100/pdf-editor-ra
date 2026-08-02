@@ -180,6 +180,10 @@ async def docx2pdf(
 
         try:
             convert_docx_to_pdf(str(input_path), str(output_path))
+        except ValueError as e:
+            # The upload is not a Word document — a client problem, not ours.
+            shutil.rmtree(tmpdir)
+            raise HTTPException(422, str(e))
         except Exception as e:
             shutil.rmtree(tmpdir)
             raise HTTPException(500, str(e))

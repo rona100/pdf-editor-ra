@@ -254,7 +254,7 @@ NOTES:
     elif args.command == 'docx2pdf':
         try:
             convert_docx_to_pdf(args.input_docx, args.output_pdf, timeout=args.timeout)
-        except RuntimeError as e:
+        except (RuntimeError, ValueError) as e:
             print(f"Error: {e}")
             sys.exit(1)
 

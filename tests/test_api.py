@@ -283,13 +283,13 @@ class TestDocx2PdfAPI:
         assert len(reader.pages) >= 1
         assert "Round trip me" in reader.pages[0].extract_text()
 
-    @needs_soffice
     def test_docx2pdf_rejects_a_non_document(self):
         response = client.post(
             "/api/docx2pdf",
             files={"file": ("bogus.docx", b"not a docx", DOCX_UPLOAD_TYPE)},
         )
-        assert response.status_code == 500
+        assert response.status_code == 422
+        assert "not a Word document" in response.json()["detail"]
 
     def test_docx2pdf_missing_file_returns_422(self):
         response = client.post("/api/docx2pdf")

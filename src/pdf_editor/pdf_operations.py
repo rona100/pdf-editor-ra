@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 
 from .docx_rtl import apply_rtl
@@ -282,6 +283,7 @@ def convert_docx_to_pdf(input_path: str, output_path: str, timeout: int = 120) -
         output_path (str): Path to save the output PDF file
         timeout (int): Seconds to wait for LibreOffice before giving up
     """
+    _check_is_docx(input_path)
     soffice = _find_soffice()
 
     with tempfile.TemporaryDirectory(prefix="pdf_editor_soffice_") as workdir:
@@ -328,6 +330,30 @@ def convert_docx_to_pdf(input_path: str, output_path: str, timeout: int = 120) -
         shutil.move(str(produced[0]), output_path)
 
     print(f"Successfully converted '{input_path}' to PDF and saved as '{output_path}'")
+
+
+def _check_is_docx(input_path: str) -> None:
+    """
+    Raises ValueError unless `input_path` is really a Word document.
+
+    LibreOffice sniffs content rather than trusting the extension, so handing
+    it arbitrary bytes yields a PDF of those bytes rendered as plain text
+    instead of an error. Checking up front keeps that from looking like a
+    successful conversion.
+    """
+    try:
+        with zipfile.ZipFile(input_path) as archive:
+            names = set(archive.namelist())
+    except (zipfile.BadZipFile, OSError):
+        raise ValueError(
+            f"'{input_path}' is not a Word document (expected a .docx file)"
+        )
+
+    if "word/document.xml" not in names:
+        raise ValueError(
+            f"'{input_path}' is a zip archive but not a Word document "
+            "(no word/document.xml)"
+        )
 
 
 def _find_soffice() -> str:
