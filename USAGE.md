@@ -6,7 +6,8 @@ PDF Editor is a dual-mode application for manipulating PDF files. Use it as a **
 - Rotate pages by 90, 180, or 270 degrees
 - Merge multiple PDF files
 - Reorder pages
-- Convert PDFs to DOCX format
+- Convert PDFs to DOCX format (with right-to-left repair for Hebrew and Arabic)
+- Convert DOCX files back to PDF
 
 ## Installation
 
@@ -127,11 +128,45 @@ uv run python -m pdf_editor convert <input_pdf> -o <output_docx>
 **Arguments:**
 - **input_pdf**: Path to the input PDF
 - **-o, --output**: Path for the output DOCX (default: `converted.docx`)
+- **--rtl**: Right-to-left handling — `auto` (default), `on`, or `off`
 
 **Example:**
 ```bash
 uv run python -m pdf_editor convert document.pdf -o output.docx
+
+# Force the RTL repair pass even if detection does not trigger
+uv run python -m pdf_editor convert hebrew.pdf -o hebrew.docx --rtl on
 ```
+
+**Right-to-left documents (NOT WORKING YET):** the repair described below is implemented
+and unit tested, but Hebrew PDF to DOCX output is still not correct in Word. Treat it as
+work in progress and pass `--rtl off` for the previous behaviour.
+
+**How it is meant to work:** Hebrew and Arabic PDFs are detected automatically. The
+converter rebuilds logical word order from character positions and marks the resulting
+paragraphs, runs, and sections right-to-left, so Word renders them correctly. Left-to-right
+documents are left exactly as they were; pass `--rtl off` to skip the pass entirely.
+
+#### Convert DOCX to PDF
+
+Convert a Microsoft Word file to PDF.
+
+```bash
+uv run python -m pdf_editor docx2pdf <input_docx> -o <output_pdf>
+```
+
+**Arguments:**
+- **input_docx**: Path to the input DOCX
+- **-o, --output**: Path for the output PDF (default: `converted.pdf`)
+- **-t, --timeout**: Seconds to wait for LibreOffice (default: 120)
+
+**Example:**
+```bash
+uv run python -m pdf_editor docx2pdf document.docx -o output.pdf
+```
+
+**Requires LibreOffice.** Install it with `sudo apt-get install -y libreoffice-writer`, or set
+`SOFFICE_BIN` to the binary's path if it is not on `PATH`. The Docker image already includes it.
 
 ### Getting Help
 
@@ -182,7 +217,8 @@ The web app provides a tabbed interface:
 - **Rotate**: Upload a PDF, select pages to rotate, choose rotation angle, download result
 - **Merge**: Upload two PDFs and merge them
 - **Reorder**: Upload a PDF, specify the number of pages and new order
-- **Convert**: Upload a PDF and convert it to DOCX
+- **PDF to DOCX**: Upload a PDF and convert it to DOCX, with a right-to-left mode selector
+- **DOCX to PDF**: Upload a Word document and convert it to PDF
 
 All operations are non-destructive; original files are never modified.
 
@@ -195,7 +231,8 @@ If you prefer to automate web requests, all operations are available as POST end
 | `POST /api/rotate` | `file` (PDF), `pages` (str: "1,2,3"), `angle` (int: 90/180/270) | PDF |
 | `POST /api/merge` | `file1` (PDF), `file2` (PDF) | PDF |
 | `POST /api/order` | `file` (PDF), `num_pages` (int), `new_order` (str: "1,3,2") | PDF |
-| `POST /api/convert` | `file` (PDF) | DOCX |
+| `POST /api/convert` | `file` (PDF), `rtl` (str: `auto`/`on`/`off`, default `auto`) | DOCX |
+| `POST /api/docx2pdf` | `file` (DOCX) | PDF |
 
 **Example (using curl):**
 ```bash
@@ -341,6 +378,13 @@ Frontend tests use Vitest + React Testing Library and cover the App component, F
 - PDF→DOCX conversion may lose formatting on complex PDFs (tables, special fonts, etc.)
 - If conversion fails silently, the system falls back to text extraction (plain text only)
 - Scanned PDFs (image-based) cannot be converted to DOCX; use OCR preprocessing if needed
+- RTL repair substitutes text it can match against the PDF's own lines and spans; anything it
+  cannot match is left as-is rather than guessed at, so a few fragments may remain misordered
+
+### Conversion to PDF
+- Requires LibreOffice on the server; without it the operation returns a clear error
+- Each conversion runs with its own LibreOffice user profile, so concurrent requests are safe
+- Layout, tables, images, and right-to-left text are preserved
 
 ---
 

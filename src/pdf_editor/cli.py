@@ -2,13 +2,20 @@
 
 import argparse
 import sys
-from .pdf_operations import merge_pdfs, rotate_pdf_pages, convert_pdf_to_docx, order_pdf_pages
+from .pdf_operations import (
+    RTL_MODES,
+    convert_docx_to_pdf,
+    convert_pdf_to_docx,
+    merge_pdfs,
+    order_pdf_pages,
+    rotate_pdf_pages,
+)
 
 
 def main() -> None:
     """Main entry point for the PDF Editor CLI."""
     parser = argparse.ArgumentParser(
-        description="PDF Editor - Rotate pages, merge PDF files, reorder pages, or convert to DOCX",
+        description="PDF Editor - Rotate pages, merge PDF files, reorder pages, or convert between PDF and DOCX",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -152,9 +159,13 @@ EXAMPLES:
   Convert a scanned PDF (may have lower quality):
     python -m pdf_editor convert scanned.pdf -o scanned.docx
 
+  Force right-to-left handling for a Hebrew or Arabic document:
+    python -m pdf_editor convert hebrew.pdf -o hebrew.docx --rtl on
+
 NOTES:
   - The conversion preserves text, formatting, and layout as much as possible
   - Image-based PDFs may have lower conversion quality
+  - RTL scripts (Hebrew, Arabic) are detected automatically; --rtl overrides it
   - The original PDF file is not modified
   - If output file exists, it will be overwritten
         """,
@@ -169,6 +180,52 @@ NOTES:
         dest="output_docx",
         default="converted.docx",
         help="Path to save the output DOCX file (default: converted.docx)"
+    )
+    convert_parser.add_argument(
+        "--rtl",
+        choices=RTL_MODES,
+        default="auto",
+        help="Right-to-left text handling (default: auto, detected from the PDF)"
+    )
+
+    # DOCX to PDF command
+    docx2pdf_parser = subparsers.add_parser(
+        'docx2pdf',
+        help='Convert a Word DOCX file to PDF format',
+        description="Convert a Microsoft Word DOCX file to PDF using LibreOffice.",
+        epilog="""
+EXAMPLES:
+  Convert a DOCX to PDF:
+    python -m pdf_editor docx2pdf document.docx -o document.pdf
+
+  Round-trip a converted PDF back to PDF:
+    python -m pdf_editor convert original.pdf -o edited.docx
+    python -m pdf_editor docx2pdf edited.docx -o final.pdf
+
+NOTES:
+  - Requires LibreOffice: apt-get install -y libreoffice-writer
+  - Set SOFFICE_BIN to point at the binary if it is not on PATH
+  - Layout, tables, images, and RTL text are preserved
+  - The original DOCX file is not modified
+  - If output file exists, it will be overwritten
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    docx2pdf_parser.add_argument(
+        "input_docx",
+        help="Path to the input DOCX file"
+    )
+    docx2pdf_parser.add_argument(
+        "-o", "--output",
+        dest="output_pdf",
+        default="converted.pdf",
+        help="Path to save the output PDF file (default: converted.pdf)"
+    )
+    docx2pdf_parser.add_argument(
+        "-t", "--timeout",
+        type=int,
+        default=120,
+        help="Seconds to wait for LibreOffice (default: 120)"
     )
 
     args = parser.parse_args()
@@ -192,7 +249,14 @@ NOTES:
         merge_pdfs(args.file1, args.file2, args.output_pdf)
 
     elif args.command == 'convert':
-        convert_pdf_to_docx(args.input_pdf, args.output_docx)
+        convert_pdf_to_docx(args.input_pdf, args.output_docx, rtl=args.rtl)
+
+    elif args.command == 'docx2pdf':
+        try:
+            convert_docx_to_pdf(args.input_docx, args.output_pdf, timeout=args.timeout)
+        except RuntimeError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
     else:
         parser.print_help()

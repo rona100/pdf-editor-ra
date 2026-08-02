@@ -1,10 +1,21 @@
 import io
+import shutil
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 from pypdf import PdfReader, PdfWriter
 from pdf_editor.api.app import app
 
 client = TestClient(app)
+
+DOCX_UPLOAD_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+needs_soffice = pytest.mark.skipif(
+    shutil.which("soffice") is None and shutil.which("libreoffice") is None,
+    reason="LibreOffice is not installed",
+)
 
 
 def make_pdf_bytes(pages: int = 2) -> bytes:
@@ -13,6 +24,14 @@ def make_pdf_bytes(pages: int = 2) -> bytes:
         writer.add_blank_page(width=612, height=792)
     buf = io.BytesIO()
     writer.write(buf)
+    return buf.getvalue()
+
+
+def make_docx_bytes(text: str = "Hello from a Word document") -> bytes:
+    document = Document()
+    document.add_paragraph(text)
+    buf = io.BytesIO()
+    document.save(buf)
     return buf.getvalue()
 
 
@@ -210,4 +229,68 @@ class TestConvertAPI:
 
     def test_convert_missing_file_returns_422(self):
         response = client.post("/api/convert")
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize("rtl", ["auto", "on", "off"])
+    def test_convert_accepts_each_rtl_mode(self, rtl):
+        pdf = make_pdf_bytes(1)
+        response = client.post(
+            "/api/convert",
+            data={"rtl": rtl},
+            files={"file": ("test.pdf", pdf, "application/pdf")},
+        )
+        assert response.status_code == 200
+        assert "wordprocessingml" in response.headers["content-type"]
+
+    def test_convert_rejects_an_unknown_rtl_mode(self):
+        pdf = make_pdf_bytes(1)
+        response = client.post(
+            "/api/convert",
+            data={"rtl": "sideways"},
+            files={"file": ("test.pdf", pdf, "application/pdf")},
+        )
+        assert response.status_code == 422
+        assert "rtl must be one of" in response.json()["detail"]
+
+
+class TestDocx2PdfAPI:
+    @needs_soffice
+    def test_docx2pdf_returns_pdf(self):
+        response = client.post(
+            "/api/docx2pdf",
+            files={"file": ("test.docx", make_docx_bytes(), DOCX_UPLOAD_TYPE)},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+
+    @needs_soffice
+    def test_docx2pdf_response_has_filename(self):
+        response = client.post(
+            "/api/docx2pdf",
+            files={"file": ("test.docx", make_docx_bytes(), DOCX_UPLOAD_TYPE)},
+        )
+        assert response.status_code == 200
+        assert "converted.pdf" in response.headers.get("content-disposition", "")
+
+    @needs_soffice
+    def test_docx2pdf_output_is_a_readable_pdf(self):
+        response = client.post(
+            "/api/docx2pdf",
+            files={"file": ("test.docx", make_docx_bytes("Round trip me"), DOCX_UPLOAD_TYPE)},
+        )
+        assert response.status_code == 200
+        reader = PdfReader(io.BytesIO(response.content))
+        assert len(reader.pages) >= 1
+        assert "Round trip me" in reader.pages[0].extract_text()
+
+    @needs_soffice
+    def test_docx2pdf_rejects_a_non_document(self):
+        response = client.post(
+            "/api/docx2pdf",
+            files={"file": ("bogus.docx", b"not a docx", DOCX_UPLOAD_TYPE)},
+        )
+        assert response.status_code == 500
+
+    def test_docx2pdf_missing_file_returns_422(self):
+        response = client.post("/api/docx2pdf")
         assert response.status_code == 422

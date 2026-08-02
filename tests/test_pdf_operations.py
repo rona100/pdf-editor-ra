@@ -1,11 +1,28 @@
 import pytest
+import shutil
 import tempfile
 import os
 from pathlib import Path
+
+import fitz
+from docx import Document
 from pypdf import PdfReader, PdfWriter
 
 # Import the functions to test
-from pdf_editor.pdf_operations import rotate_pdf_pages, merge_pdfs, convert_pdf_to_docx, order_pdf_pages
+from pdf_editor import pdf_operations
+from pdf_editor.pdf_operations import (
+    convert_docx_to_pdf,
+    convert_pdf_to_docx,
+    merge_pdfs,
+    order_pdf_pages,
+    rotate_pdf_pages,
+)
+from test_rtl import HEBREW_FONT, needs_hebrew_font
+
+needs_soffice = pytest.mark.skipif(
+    shutil.which('soffice') is None and shutil.which('libreoffice') is None,
+    reason='LibreOffice is not installed',
+)
 
 
 class TestPDFOperations:
@@ -354,6 +371,247 @@ class TestPDFOperations:
         finally:
             os.unlink(pdf1)
             os.unlink(pdf2)
+
+
+class TestConvertRTL:
+    """Right-to-left handling in convert_pdf_to_docx."""
+
+    def make_pdf(self, text, path):
+        """Write a one-page PDF containing text, using a Hebrew-capable font."""
+        doc = fitz.open()
+        page = doc.new_page()
+        if HEBREW_FONT:
+            page.insert_font(fontname='rtlfont', fontfile=HEBREW_FONT)
+            page.insert_text((72, 72), text, fontname='rtlfont', fontsize=14)
+        else:
+            page.insert_text((72, 72), text, fontname='helv', fontsize=14)
+        doc.save(path)
+        doc.close()
+
+    def body_xml(self, docx_path):
+        return Document(docx_path).element.body.xml
+
+    def test_rejects_an_unknown_rtl_mode(self):
+        input_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            self.make_pdf('Hello', input_pdf)
+            with pytest.raises(ValueError, match='rtl must be one of'):
+                convert_pdf_to_docx(input_pdf, '/tmp/unused.docx', rtl='sideways')
+        finally:
+            os.unlink(input_pdf)
+
+    def test_ltr_pdf_gets_no_rtl_markup(self):
+        """Regression guard: left-to-right documents must be untouched."""
+        input_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        output_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        try:
+            self.make_pdf('Plain English text, nothing to repair.', input_pdf)
+            convert_pdf_to_docx(input_pdf, output_docx)
+
+            xml = self.body_xml(output_docx)
+            assert '<w:rtl' not in xml
+            assert '<w:bidi' not in xml
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_docx):
+                os.unlink(output_docx)
+
+    @needs_hebrew_font
+    def test_hebrew_pdf_gets_rtl_markup(self):
+        input_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        output_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        try:
+            self.make_pdf('שלום עולם', input_pdf)
+            convert_pdf_to_docx(input_pdf, output_docx)
+
+            xml = self.body_xml(output_docx)
+            assert '<w:rtl' in xml
+            assert '<w:bidi' in xml
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_docx):
+                os.unlink(output_docx)
+
+    @needs_hebrew_font
+    def test_rtl_off_skips_the_repair_pass(self):
+        input_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        output_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        try:
+            self.make_pdf('שלום עולם', input_pdf)
+            convert_pdf_to_docx(input_pdf, output_docx, rtl='off')
+
+            assert '<w:rtl' not in self.body_xml(output_docx)
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_docx):
+                os.unlink(output_docx)
+
+    def test_rtl_on_forces_the_repair_pass(self):
+        """'on' applies direction markup even when detection would say no."""
+        input_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        output_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        try:
+            self.make_pdf('Latin only', input_pdf)
+            convert_pdf_to_docx(input_pdf, output_docx, rtl='on')
+
+            # Nothing to mark, but the pass must run without damaging the file.
+            assert Document(output_docx) is not None
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_docx):
+                os.unlink(output_docx)
+
+
+class TestConvertDocxToPdf:
+    """DOCX to PDF conversion through LibreOffice."""
+
+    def make_docx(self, path, text='Hello from a Word document'):
+        document = Document()
+        document.add_heading('Test Document', 0)
+        document.add_paragraph(text)
+        document.save(path)
+
+    def fake_soffice(self, tmp_path, body):
+        """
+        Install a stand-in for the LibreOffice binary.
+
+        Lets the surrounding plumbing — argument construction, output
+        relocation, failure handling — be tested on machines without
+        LibreOffice installed.
+        """
+        script = tmp_path / 'soffice'
+        script.write_text('#!/usr/bin/env python3\n' + body)
+        script.chmod(0o755)
+        return str(script)
+
+    def test_relocates_output_from_libreoffice_s_naming(self, tmp_path, monkeypatch):
+        """LibreOffice writes <stem>.pdf into --outdir; we must move it."""
+        stub = self.fake_soffice(tmp_path, '''
+import sys, pathlib
+outdir = pathlib.Path(sys.argv[sys.argv.index("--outdir") + 1])
+stem = pathlib.Path(sys.argv[-1]).stem
+(outdir / (stem + ".pdf")).write_bytes(b"%PDF-1.4 stub")
+''')
+        monkeypatch.setenv('SOFFICE_BIN', stub)
+
+        input_docx = tmp_path / 'source.docx'
+        self.make_docx(str(input_docx))
+        output_pdf = tmp_path / 'a-different-name.pdf'
+
+        convert_docx_to_pdf(str(input_docx), str(output_pdf))
+
+        assert output_pdf.read_bytes() == b'%PDF-1.4 stub'
+
+    def test_raises_when_libreoffice_exits_zero_without_output(self, tmp_path, monkeypatch):
+        """LibreOffice can report success having produced nothing at all."""
+        stub = self.fake_soffice(tmp_path, 'import sys; sys.exit(0)\n')
+        monkeypatch.setenv('SOFFICE_BIN', stub)
+
+        input_docx = tmp_path / 'source.docx'
+        self.make_docx(str(input_docx))
+
+        with pytest.raises(RuntimeError, match='produced no PDF'):
+            convert_docx_to_pdf(str(input_docx), str(tmp_path / 'out.pdf'))
+
+    def test_raises_with_stderr_on_failure(self, tmp_path, monkeypatch):
+        stub = self.fake_soffice(
+            tmp_path,
+            'import sys; print("conversion blew up", file=sys.stderr); sys.exit(3)\n',
+        )
+        monkeypatch.setenv('SOFFICE_BIN', stub)
+
+        input_docx = tmp_path / 'source.docx'
+        self.make_docx(str(input_docx))
+
+        with pytest.raises(RuntimeError, match='conversion blew up'):
+            convert_docx_to_pdf(str(input_docx), str(tmp_path / 'out.pdf'))
+
+    def test_raises_on_timeout(self, tmp_path, monkeypatch):
+        stub = self.fake_soffice(tmp_path, 'import time; time.sleep(30)\n')
+        monkeypatch.setenv('SOFFICE_BIN', stub)
+
+        input_docx = tmp_path / 'source.docx'
+        self.make_docx(str(input_docx))
+
+        with pytest.raises(RuntimeError, match='timed out'):
+            convert_docx_to_pdf(str(input_docx), str(tmp_path / 'out.pdf'), timeout=1)
+
+    def test_uses_a_private_profile_directory(self, tmp_path, monkeypatch):
+        """Concurrent conversions must not share a LibreOffice user profile."""
+        stub = self.fake_soffice(tmp_path, '''
+import sys, pathlib
+outdir = pathlib.Path(sys.argv[sys.argv.index("--outdir") + 1])
+(outdir / "argv.txt").write_text("\\n".join(sys.argv))
+stem = pathlib.Path(sys.argv[-1]).stem
+(outdir / (stem + ".pdf")).write_bytes(b"%PDF-1.4 stub")
+''')
+        monkeypatch.setenv('SOFFICE_BIN', stub)
+
+        recorded = {}
+        real_move = pdf_operations.shutil.move
+
+        def capture(src, dst):
+            recorded['argv'] = (Path(src).parent / 'argv.txt').read_text()
+            return real_move(src, dst)
+
+        monkeypatch.setattr(pdf_operations.shutil, 'move', capture)
+
+        input_docx = tmp_path / 'source.docx'
+        self.make_docx(str(input_docx))
+        convert_docx_to_pdf(str(input_docx), str(tmp_path / 'out.pdf'))
+
+        assert '-env:UserInstallation=file://' in recorded['argv']
+        assert '--headless' in recorded['argv']
+
+    def test_missing_libreoffice_explains_how_to_install_it(self, monkeypatch):
+        monkeypatch.delenv('SOFFICE_BIN', raising=False)
+        monkeypatch.setattr(pdf_operations.shutil, 'which', lambda _: None)
+
+        with pytest.raises(RuntimeError, match='libreoffice-writer'):
+            convert_docx_to_pdf('input.docx', 'output.pdf')
+
+    @needs_soffice
+    def test_converts_a_docx_to_a_readable_pdf(self):
+        input_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        output_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        try:
+            self.make_docx(input_docx)
+            convert_docx_to_pdf(input_docx, output_pdf)
+
+            assert os.path.exists(output_pdf)
+            reader = PdfReader(output_pdf)
+            assert len(reader.pages) >= 1
+            assert 'Hello from a Word document' in reader.pages[0].extract_text()
+        finally:
+            os.unlink(input_docx)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    @needs_soffice
+    def test_writes_to_the_requested_path_not_libreoffice_s_choice(self):
+        """LibreOffice names output after the input stem; we must override it."""
+        input_docx = tempfile.NamedTemporaryFile(suffix='.docx', delete=False).name
+        output_pdf = os.path.join(tempfile.mkdtemp(), 'a-different-name.pdf')
+        try:
+            self.make_docx(input_docx)
+            convert_docx_to_pdf(input_docx, output_pdf)
+
+            assert os.path.exists(output_pdf)
+        finally:
+            os.unlink(input_docx)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    @needs_soffice
+    def test_rejects_a_file_that_is_not_a_document(self):
+        bogus = tempfile.NamedTemporaryFile(suffix='.docx', delete=False)
+        bogus.write(b'this is not a docx at all')
+        bogus.close()
+        try:
+            with pytest.raises(RuntimeError):
+                convert_docx_to_pdf(bogus.name, '/tmp/should-not-exist.pdf')
+        finally:
+            os.unlink(bogus.name)
 
 
 if __name__ == "__main__":

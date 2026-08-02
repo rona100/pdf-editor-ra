@@ -1,12 +1,27 @@
 """Integration tests for the CLI, exercising the full argument-parsing + operations chain."""
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 
 import pytest
+from docx import Document
 from pypdf import PdfReader, PdfWriter
+
+needs_soffice = pytest.mark.skipif(
+    shutil.which("soffice") is None and shutil.which("libreoffice") is None,
+    reason="LibreOffice is not installed",
+)
+
+
+def make_test_docx(text: str = "Hello from a Word document") -> str:
+    document = Document()
+    document.add_paragraph(text)
+    tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    document.save(tmp.name)
+    return tmp.name
 
 
 def make_test_pdf(pages: int = 3) -> str:
@@ -198,3 +213,56 @@ class TestCLIConvert:
     def test_convert_missing_args_exits_nonzero(self):
         result = run_cli("convert")
         assert result.returncode != 0
+
+    def test_convert_accepts_rtl_flag(self):
+        input_pdf = make_test_pdf(1)
+        output_docx = tempfile.NamedTemporaryFile(suffix=".docx", delete=False).name
+        try:
+            result = run_cli("convert", input_pdf, "-o", output_docx, "--rtl", "off")
+            assert result.returncode == 0
+            assert os.path.exists(output_docx)
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_docx):
+                os.unlink(output_docx)
+
+    def test_convert_rejects_unknown_rtl_mode(self):
+        input_pdf = make_test_pdf(1)
+        try:
+            result = run_cli("convert", input_pdf, "--rtl", "sideways")
+            assert result.returncode != 0
+        finally:
+            os.unlink(input_pdf)
+
+
+class TestCLIDocx2Pdf:
+    @needs_soffice
+    def test_docx2pdf_produces_pdf(self):
+        input_docx = make_test_docx()
+        output_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False).name
+        try:
+            result = run_cli("docx2pdf", input_docx, "-o", output_pdf)
+            assert result.returncode == 0, result.stderr
+            assert os.path.exists(output_pdf)
+            assert len(PdfReader(output_pdf).pages) >= 1
+        finally:
+            os.unlink(input_docx)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    def test_docx2pdf_missing_args_exits_nonzero(self):
+        result = run_cli("docx2pdf")
+        assert result.returncode != 0
+
+    def test_docx2pdf_reports_failure_without_traceback(self):
+        """A bad input should exit non-zero with a message, not a stack trace."""
+        bogus = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+        bogus.write(b"definitely not a docx")
+        bogus.close()
+        try:
+            result = run_cli("docx2pdf", bogus.name, "-o", "/tmp/should-not-exist.pdf")
+            assert result.returncode != 0
+            assert "Traceback" not in result.stderr
+            assert "Error:" in result.stdout
+        finally:
+            os.unlink(bogus.name)

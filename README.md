@@ -6,7 +6,8 @@ Supported operations:
 - **Rotate** specific pages by 90, 180, or 270 degrees
 - **Merge** two PDF files into one
 - **Reorder** pages using a position mapping
-- **Convert** PDFs to Microsoft Word DOCX format
+- **Convert** PDFs to Microsoft Word DOCX format, with right-to-left (Hebrew, Arabic) repair
+- **Convert** DOCX files back to PDF
 
 ## Quick Start
 
@@ -35,6 +36,9 @@ uv run python -m pdf_editor order document.pdf 6 1,3,2,5,4,6 -o reordered.pdf
 
 # Convert to DOCX
 uv run python -m pdf_editor convert document.pdf -o output.docx
+
+# Convert DOCX back to PDF (requires LibreOffice)
+uv run python -m pdf_editor docx2pdf document.docx -o output.pdf
 ```
 
 ## Requirements
@@ -43,6 +47,8 @@ uv run python -m pdf_editor convert document.pdf -o output.docx
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended)
 - Docker (for web mode without Node.js)
 - Node.js 18+ (only for frontend development)
+- LibreOffice (only for DOCX→PDF): `sudo apt-get install -y libreoffice-writer`.
+  Already included in the Docker image. Set `SOFFICE_BIN` if the binary is not on `PATH`.
 
 ## Installation
 
@@ -69,8 +75,11 @@ uv run python -m pdf_editor merge <file1> <file2> -o <output>
 # Reorder: new_order is a permutation of 1..num_pages
 uv run python -m pdf_editor order <input> <num_pages> <new_order> -o <output>
 
-# Convert to DOCX
-uv run python -m pdf_editor convert <input> -o <output>
+# Convert to DOCX; --rtl is auto|on|off (default auto)
+uv run python -m pdf_editor convert <input> -o <output> [--rtl auto|on|off]
+
+# Convert DOCX to PDF
+uv run python -m pdf_editor docx2pdf <input> -o <output> [--timeout 120]
 
 # Help
 uv run python -m pdf_editor --help
@@ -115,7 +124,8 @@ Open **http://localhost:5173** (Vite dev server proxies `/api` to the backend).
 | `POST /api/rotate` | `file`, `pages` (e.g. `"1,2,3"`), `angle` (default 180) | PDF |
 | `POST /api/merge` | `file1`, `file2` | PDF |
 | `POST /api/order` | `file`, `num_pages`, `new_order` (e.g. `"1,3,2"`) | PDF |
-| `POST /api/convert` | `file` | DOCX |
+| `POST /api/convert` | `file`, `rtl` (`auto`\|`on`\|`off`, default `auto`) | DOCX |
+| `POST /api/docx2pdf` | `file` | PDF |
 
 ```bash
 curl -X POST http://localhost:8000/api/rotate \
@@ -144,3 +154,14 @@ cd frontend && npm run test:coverage
 - Rotation is always **clockwise**
 - All operations are **non-destructive** — originals are never modified
 - PDF→DOCX conversion may lose formatting on complex PDFs; scanned/image PDFs are not supported
+- **Right-to-left PDFs — NOT WORKING YET.** The repair pass below is implemented and unit
+  tested, but Hebrew PDF→DOCX output is still not correct in Word. Treat it as work in
+  progress; use `--rtl off` for the previous behaviour.
+- MuPDF extracts characters in content-stream order, so Hebrew and
+  Arabic lines come out with punctuation and digits on the wrong side (`נושא המחקר:` becomes
+  `:נושא המחקר`), and pdf2docx emits no bidi markup at all. `convert` detects RTL script and
+  repairs both — rebuilding logical word order from character positions and marking
+  paragraphs, runs, and sections right-to-left. Left-to-right documents are untouched.
+  Override detection with `--rtl on|off`.
+- **DOCX→PDF** shells out to LibreOffice in headless mode. Each conversion gets a private
+  user-profile directory so concurrent requests do not contend for a shared one.

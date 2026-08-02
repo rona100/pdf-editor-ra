@@ -4,9 +4,14 @@ import { Upload } from 'lucide-react'
 interface FileDropzoneProps {
   onFileSelect: (file: File) => void
   accept?: string
+  prompt?: string
 }
 
-export function FileDropzone({ onFileSelect, accept = 'application/pdf' }: FileDropzoneProps) {
+export function FileDropzone({
+  onFileSelect,
+  accept = 'application/pdf',
+  prompt = 'Drop your PDF here or click to browse',
+}: FileDropzoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = React.useState(false)
 
@@ -56,7 +61,7 @@ export function FileDropzone({ onFileSelect, accept = 'application/pdf' }: FileD
       />
       <Upload className="w-12 h-12 mx-auto mb-3 text-gray-400" />
       <p className="text-lg font-medium text-gray-700 mb-1">
-        Drop your PDF here or click to browse
+        {prompt}
       </p>
       <p className="text-sm text-gray-500">
         Maximum file size: 100 MB
