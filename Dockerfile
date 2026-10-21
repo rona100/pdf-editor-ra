@@ -9,6 +9,13 @@ RUN npm run build
 # Stage 2: Python app
 FROM python:3.13-slim
 WORKDIR /app
+
+# LibreOffice backs the DOCX to PDF conversion; fonts-dejavu gives it usable
+# glyph coverage for non-Latin scripts. writer only, not the full suite.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install uv
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/

@@ -36,7 +36,7 @@ describe('FileDropzone', () => {
   it('calls onFileSelect when a file is chosen via the input', async () => {
     const onFileSelect = vi.fn()
     const { container } = render(<FileDropzone onFileSelect={onFileSelect} />)
-    const input = container.querySelector('input[type="file"]')!
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
     const file = new File(['pdf content'], 'document.pdf', { type: 'application/pdf' })
 
     await userEvent.upload(input, file)

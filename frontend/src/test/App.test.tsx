@@ -8,12 +8,13 @@ describe('App', () => {
     expect(screen.getByText('PDF Editor')).toBeInTheDocument()
   })
 
-  it('renders all four operation tabs', () => {
+  it('renders all five operation tabs', () => {
     render(<App />)
     expect(screen.getByText('Rotate Pages')).toBeInTheDocument()
     expect(screen.getByText('Merge PDFs')).toBeInTheDocument()
     expect(screen.getByText('Reorder Pages')).toBeInTheDocument()
-    expect(screen.getByText('Convert to DOCX')).toBeInTheDocument()
+    expect(screen.getByText('PDF to DOCX')).toBeInTheDocument()
+    expect(screen.getByText('DOCX to PDF')).toBeInTheDocument()
   })
 
   it('shows the Rotate operation by default', () => {
@@ -36,10 +37,19 @@ describe('App', () => {
     expect(screen.getByText('New Order')).toBeInTheDocument()
   })
 
-  it('switches to the Convert operation', async () => {
+  it('switches to the PDF to DOCX operation', async () => {
     render(<App />)
-    await userEvent.click(screen.getByText('Convert to DOCX'))
+    await userEvent.click(screen.getByText('PDF to DOCX'))
     expect(screen.getByText(/image-based or complex pdfs/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/right-to-left text/i)).toBeInTheDocument()
+  })
+
+  it('switches to the DOCX to PDF operation', async () => {
+    render(<App />)
+    await userEvent.click(screen.getByText('DOCX to PDF'))
+    expect(screen.getByText('DOCX File')).toBeInTheDocument()
+    expect(screen.getByText(/drop your docx here/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Convert to PDF' })).toBeInTheDocument()
   })
 
   it('renders the footer', () => {

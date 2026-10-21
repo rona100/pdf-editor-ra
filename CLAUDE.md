@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 PDF Editor is a dual-mode application for manipulating PDF files:
-- **CLI Mode**: Command-line tool with four operations (rotate, merge, reorder, convert)
+- **CLI Mode**: Command-line tool with five operations (rotate, merge, reorder, convert, docx2pdf)
 - **Web Mode**: Browser-based UI with REST API backend (FastAPI) and React frontend
 
-Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, convert PDFs to DOCX.
+Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, convert PDFs to DOCX (with right-to-left repair), convert DOCX to PDF.
 
 ## Key design points
 
@@ -19,7 +19,13 @@ Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, c
 - CORS configured for dev (localhost:5173 Vite); production serves React from same origin
 - Dual-mode maintained via conditional in `__main__.py` — no architectural coupling
 
+## System dependencies
+
+- LibreOffice (`libreoffice-writer`), optional and only for DOCX→PDF — located via `shutil.which('soffice'/'libreoffice')` or the `SOFFICE_BIN` env var
+
 ## Docker
+
+The image installs `libreoffice-writer` and `fonts-dejavu`; DOCX→PDF fails with a clear error without them.
 
 Key Dockerfile requirements (learned from debugging):
 - `src/` must be copied **before** `uv pip install` (editable install needs sources present)
@@ -36,7 +42,12 @@ Key Dockerfile requirements (learned from debugging):
 
 - Page numbers in CLI/API are 1-based; pypdf uses 0-based internally (conversion in `pdf_operations`)
 - The `order_pdf_pages` function validates that reorder list is a permutation of 1 to num_pages
-- PDF to DOCX conversion can fail silently on complex PDFs and fall back to text extraction (loses formatting/layout)
+- pdf2docx skips a page whose layout it cannot build and still reports success, so a conversion that "worked" can be missing a page's content. `_convert_with_pdf2docx` passes `ignore_page_error=False` to turn that into an exception, retries once with a relaxed `min_border_clearance`, and only then falls back to text extraction (which keeps all the text and none of the layout)
+- pdf2docx can also drop content *without* raising — shaded regions and text boxes are the usual casualties — so `_warn_if_incomplete` compares the converted text against the PDF's lines and warns below 95%
+- RTL repair is gated on detection (`pdf_has_rtl`), so LTR documents produce byte-identical output to before the feature existed — keep it that way when changing `convert_pdf_to_docx`
+- RTL text substitution matches against exact and whitespace-normalized keys only; unmatched runs are left untouched rather than guessed at
+- `_repair_rtl` swallows its own exceptions on purpose: a converted document with unrepaired RTL beats losing the conversion
+- DOCX→PDF passes `-env:UserInstallation` per call; without it concurrent LibreOffice invocations contend for one profile and hang
 - Temp directory cleanup in web routes happens *after* FileResponse is sent (via BackgroundTasks) — critical for streaming
 - All API routes wrap `pdf_operations` functions; never modify pdf_operations for API behavior changes
 - Development CORS configured only for localhost:5173 (Vite dev server); production uses same-origin serving

@@ -3,16 +3,20 @@ import { RotateOperation } from './operations/RotateOperation'
 import { MergeOperation } from './operations/MergeOperation'
 import { OrderOperation } from './operations/OrderOperation'
 import { ConvertOperation } from './operations/ConvertOperation'
+import { Docx2PdfOperation } from './operations/Docx2PdfOperation'
 import { FileText } from 'lucide-react'
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'rotate' | 'merge' | 'order' | 'convert'>('rotate')
+  const [activeTab, setActiveTab] = useState<
+    'rotate' | 'merge' | 'order' | 'convert' | 'docx2pdf'
+  >('rotate')
 
   const tabs = [
     { id: 'rotate', label: 'Rotate Pages', icon: '🔄' },
     { id: 'merge', label: 'Merge PDFs', icon: '📎' },
     { id: 'order', label: 'Reorder Pages', icon: '↕️' },
-    { id: 'convert', label: 'Convert to DOCX', icon: '📄' },
+    { id: 'convert', label: 'PDF to DOCX', icon: '📄' },
+    { id: 'docx2pdf', label: 'DOCX to PDF', icon: '📕' },
   ] as const
 
   return (
@@ -56,6 +60,7 @@ function App() {
           {activeTab === 'merge' && <MergeOperation />}
           {activeTab === 'order' && <OrderOperation />}
           {activeTab === 'convert' && <ConvertOperation />}
+          {activeTab === 'docx2pdf' && <Docx2PdfOperation />}
         </div>
       </div>
 
