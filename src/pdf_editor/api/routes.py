@@ -5,11 +5,15 @@ from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, HTTPExce
 from fastapi.responses import FileResponse
 from ..pdf_operations import (
     RTL_MODES,
+    SANITIZE_DEFAULT_LANG,
+    SANITIZE_MODES,
     convert_docx_to_pdf,
     convert_pdf_to_docx,
     merge_pdfs,
     order_pdf_pages,
     rotate_pdf_pages,
+    sanitize_pdf,
+    scrub_pdf,
 )
 
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -193,6 +197,51 @@ async def docx2pdf(
             str(output_path),
             media_type="application/pdf",
             filename="converted.pdf",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/sanitize")
+async def sanitize(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    mode: str = Form("ocr"),
+    lang: str = Form(SANITIZE_DEFAULT_LANG),
+):
+    tmpdir = Path(tempfile.mkdtemp(prefix="pdf_editor_"))
+    try:
+        input_path = tmpdir / "input.pdf"
+        output_path = tmpdir / "sanitized.pdf"
+
+        with open(input_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        if mode not in SANITIZE_MODES:
+            shutil.rmtree(tmpdir)
+            raise HTTPException(422, f"mode must be one of {', '.join(SANITIZE_MODES)}")
+
+        try:
+            if mode == "basic":
+                scrub_pdf(str(input_path), str(output_path))
+            else:
+                sanitize_pdf(str(input_path), str(output_path), lang=lang)
+        except ValueError as e:
+            # A bad language code or an unreadable upload — a client problem.
+            shutil.rmtree(tmpdir)
+            raise HTTPException(422, str(e))
+        except Exception as e:
+            shutil.rmtree(tmpdir)
+            raise HTTPException(500, str(e))
+
+        background_tasks.add_task(shutil.rmtree, str(tmpdir), True)
+        return FileResponse(
+            str(output_path),
+            media_type="application/pdf",
+            filename="sanitized.pdf",
         )
     except HTTPException:
         raise

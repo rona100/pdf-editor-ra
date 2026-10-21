@@ -17,6 +17,8 @@ from pdf_editor.pdf_operations import (
     merge_pdfs,
     order_pdf_pages,
     rotate_pdf_pages,
+    sanitize_pdf,
+    scrub_pdf,
 )
 from test_rtl import HEBREW_FONT, needs_hebrew_font
 
@@ -25,6 +27,11 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 needs_soffice = pytest.mark.skipif(
     shutil.which('soffice') is None and shutil.which('libreoffice') is None,
     reason='LibreOffice is not installed',
+)
+
+needs_tesseract = pytest.mark.skipif(
+    shutil.which('tesseract') is None,
+    reason='Tesseract is not installed',
 )
 
 
@@ -820,3 +827,143 @@ stem = pathlib.Path(sys.argv[-1]).stem
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+def make_text_pdf(path: Path, lines: list[str]) -> None:
+    """Writes a one-page PDF with large Helvetica text and identifying metadata."""
+    document = fitz.open()
+    page = document.new_page()
+    for index, line in enumerate(lines):
+        page.insert_text((72, 120 + index * 60), line, fontsize=28, fontname='helv')
+    document.set_metadata({
+        'author': 'Secret Author',
+        'creator': 'Tracking Creator',
+        'producer': 'Tracking Producer',
+        'title': 'Confidential Title',
+    })
+    document.save(path)
+    document.close()
+
+
+class TestSanitizePdf:
+    @needs_tesseract
+    def test_sanitize_rebuilds_searchable_pdf_without_metadata(self, tmp_path):
+        source = tmp_path / 'source.pdf'
+        output = tmp_path / 'sanitized.pdf'
+        make_text_pdf(source, ['Quarterly Report', 'Sanitize Me Please'])
+
+        sanitize_pdf(str(source), str(output), lang='eng')
+
+        reader = PdfReader(str(output))
+        assert len(reader.pages) == 1
+        assert all(value == '' for value in reader.metadata.values())
+
+        text = reader.pages[0].extract_text()
+        assert 'Quarterly' in text
+        assert 'Sanitize' in text
+
+        with fitz.open(output) as rebuilt:
+            fonts = {font[3] for font in rebuilt[0].get_fonts()}
+        assert not any('Helvetica' in name for name in fonts)
+
+    @needs_tesseract
+    def test_sanitize_keeps_page_count(self, tmp_path):
+        source = tmp_path / 'source.pdf'
+        output = tmp_path / 'sanitized.pdf'
+        document = fitz.open()
+        for number in range(3):
+            document.new_page().insert_text((72, 120), f'Page {number + 1}', fontsize=28)
+        document.save(source)
+        document.close()
+
+        sanitize_pdf(str(source), str(output), lang='eng', dpi=150)
+
+        assert len(PdfReader(str(output)).pages) == 3
+
+    def test_sanitize_rejects_malformed_lang(self, tmp_path):
+        with pytest.raises(ValueError, match='Invalid OCR language'):
+            sanitize_pdf(str(FIXTURES / 'ltr.pdf'), str(tmp_path / 'out.pdf'), lang='eng; rm -rf')
+
+    def test_missing_language_pack_is_reported(self):
+        with pytest.raises(ValueError, match='heb'):
+            pdf_operations._check_ocr_langs('eng+heb', ['eng', 'osd'])
+
+    def test_installed_languages_pass(self):
+        pdf_operations._check_ocr_langs('eng+heb', ['eng', 'heb'])
+
+    def test_missing_tesseract_raises_runtime_error(self, tmp_path, monkeypatch):
+        monkeypatch.delenv('TESSERACT_CMD', raising=False)
+        monkeypatch.setattr(pdf_operations.shutil, 'which', lambda name: None)
+        with pytest.raises(RuntimeError, match='Tesseract is required'):
+            sanitize_pdf(str(FIXTURES / 'ltr.pdf'), str(tmp_path / 'out.pdf'))
+
+
+def make_dirty_pdf(path: Path) -> None:
+    """Writes a PDF carrying each kind of hidden data scrub_pdf should strip."""
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 100), 'Visible text', fontsize=20)
+    page.insert_text((72, 200), 'Invisible secret', fontsize=20, render_mode=3)
+    page.add_text_annot((300, 300), 'Reviewer comment')
+    page.insert_link({'kind': fitz.LINK_URI, 'from': fitz.Rect(72, 80, 200, 110), 'uri': 'https://tracker.example'})
+    document.embfile_add('attachment.txt', b'attached secret')
+    document.set_metadata({'author': 'Secret Author', 'creator': 'Tracking Creator'})
+    document.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/">Secret XMP</x:xmpmeta>')
+    document.save(path)
+    document.close()
+
+
+class TestScrubPdf:
+    def test_scrub_strips_hidden_data_and_keeps_visible_text(self, tmp_path):
+        source = tmp_path / 'source.pdf'
+        output = tmp_path / 'scrubbed.pdf'
+        make_dirty_pdf(source)
+
+        scrub_pdf(str(source), str(output))
+
+        with fitz.open(output) as scrubbed:
+            page = scrubbed[0]
+            assert page.get_text().strip() == 'Visible text'
+            assert list(page.annots()) == []
+            assert page.get_links() == []
+            assert scrubbed.embfile_count() == 0
+            assert scrubbed.get_xml_metadata() == ''
+            assert all(not value for key, value in scrubbed.metadata.items() if key != 'format')
+
+        raw = output.read_bytes()
+        for secret in (b'Invisible secret', b'Reviewer comment', b'tracker.example', b'Secret Author', b'Secret XMP'):
+            assert secret not in raw
+
+    def test_scrub_keeps_page_count_and_real_text(self, tmp_path):
+        output = tmp_path / 'scrubbed.pdf'
+
+        scrub_pdf(str(FIXTURES / 'mixed.pdf'), str(output))
+
+        with fitz.open(FIXTURES / 'mixed.pdf') as original, fitz.open(output) as scrubbed:
+            assert scrubbed.page_count == original.page_count
+            assert scrubbed[0].get_text() == original[0].get_text()
+
+    def test_scrub_removes_form_fields(self, tmp_path):
+        source = tmp_path / 'form.pdf'
+        output = tmp_path / 'scrubbed.pdf'
+        document = fitz.open()
+        page = document.new_page()
+        widget = fitz.Widget()
+        widget.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+        widget.field_name = 'ssn'
+        widget.field_value = '123-45-6789'
+        widget.rect = fitz.Rect(72, 72, 300, 100)
+        page.add_widget(widget)
+        document.save(source)
+        document.close()
+
+        scrub_pdf(str(source), str(output))
+
+        with fitz.open(output) as scrubbed:
+            assert list(scrubbed[0].widgets()) == []
+        assert b'123-45-6789' not in output.read_bytes()
+
+    def test_scrub_rejects_non_pdf(self, tmp_path):
+        bogus = tmp_path / 'bogus.pdf'
+        bogus.write_bytes(b'not a pdf')
+        with pytest.raises(ValueError):
+            scrub_pdf(str(bogus), str(tmp_path / 'out.pdf'))

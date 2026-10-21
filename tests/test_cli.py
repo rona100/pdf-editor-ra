@@ -15,6 +15,11 @@ needs_soffice = pytest.mark.skipif(
     reason="LibreOffice is not installed",
 )
 
+needs_tesseract = pytest.mark.skipif(
+    shutil.which("tesseract") is None,
+    reason="Tesseract is not installed",
+)
+
 
 def make_test_docx(text: str = "Hello from a Word document") -> str:
     document = Document()
@@ -266,3 +271,44 @@ class TestCLIDocx2Pdf:
             assert "Error:" in result.stdout
         finally:
             os.unlink(bogus.name)
+
+
+class TestCLISanitize:
+    @needs_tesseract
+    def test_sanitize_produces_pdf(self):
+        input_pdf = make_test_pdf(pages=2)
+        output_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False).name
+        try:
+            result = run_cli("sanitize", input_pdf, "-o", output_pdf, "--lang", "eng", "--dpi", "100")
+            assert result.returncode == 0, result.stderr
+            assert len(PdfReader(output_pdf).pages) == 2
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
+
+    def test_sanitize_missing_args_exits_nonzero(self):
+        result = run_cli("sanitize")
+        assert result.returncode != 0
+
+    def test_sanitize_reports_bad_lang_without_traceback(self):
+        input_pdf = make_test_pdf(pages=1)
+        try:
+            result = run_cli("sanitize", input_pdf, "-o", "/tmp/should-not-exist.pdf", "--lang", "eng;x")
+            assert result.returncode != 0
+            assert "Traceback" not in result.stderr
+            assert "Error:" in result.stdout
+        finally:
+            os.unlink(input_pdf)
+
+    def test_sanitize_basic_mode_needs_no_tesseract(self):
+        input_pdf = make_test_pdf(pages=2)
+        output_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False).name
+        try:
+            result = run_cli("sanitize", input_pdf, "-o", output_pdf, "--mode", "basic")
+            assert result.returncode == 0, result.stderr
+            assert len(PdfReader(output_pdf).pages) == 2
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)

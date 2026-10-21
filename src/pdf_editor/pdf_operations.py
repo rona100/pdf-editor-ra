@@ -4,7 +4,10 @@ from pypdf import PdfReader, PdfWriter
 from pdf2docx import Converter
 import fitz  # PyMuPDF
 from docx import Document
+import io
+import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +16,8 @@ from pathlib import Path
 
 from .docx_rtl import apply_rtl
 from .rtl import build_line_corrections, normalize, pdf_has_rtl, reorder_line
+
+logger = logging.getLogger(__name__)
 
 
 def merge_pdfs(file1_path: str, file2_path: str, output_path: str) -> None:
@@ -488,4 +493,165 @@ def _find_soffice() -> str:
         "LibreOffice is required for DOCX to PDF conversion but was not found. "
         "Install it with 'apt-get install -y libreoffice-writer', or set "
         "SOFFICE_BIN to the binary's path."
+    )
+
+SANITIZE_MODES = ('ocr', 'basic')
+SANITIZE_DEFAULT_LANG = 'eng+heb'
+
+# Every key a PDF info dictionary commonly carries. Blanking them also
+# overwrites the Producer that pypdf and Tesseract stamp on their output.
+_SANITIZED_METADATA = {
+    key: ''
+    for key in (
+        '/Title', '/Author', '/Subject', '/Keywords',
+        '/Creator', '/Producer', '/CreationDate', '/ModDate',
+    )
+}
+
+_LANG_PATTERN = re.compile(r'^[A-Za-z_]+(\+[A-Za-z_]+)*$')
+
+
+def sanitize_pdf(input_path: str, output_path: str, lang: str = SANITIZE_DEFAULT_LANG, dpi: int = 300) -> None:
+    """
+    Rebuilds a PDF from page images plus a fresh OCR text layer.
+
+    Each page is rasterized, so the original text layer, fonts, annotations,
+    attachments and hidden data do not survive. Tesseract then lays an
+    invisible, searchable text layer over each page image, and the document
+    metadata is blanked.
+
+    Args:
+        input_path (str): Path to the input PDF file
+        output_path (str): Path to save the sanitized PDF file
+        lang (str): Tesseract language codes joined by '+', e.g. 'eng+heb'
+        dpi (int): Resolution to rasterize pages at
+    """
+    if not _LANG_PATTERN.match(lang):
+        raise ValueError(
+            f"Invalid OCR language '{lang}': use Tesseract codes joined by '+', "
+            "e.g. 'eng+heb'"
+        )
+
+    # Imported here so the other operations keep working without OCR support.
+    import pytesseract
+    from PIL import Image
+
+    pytesseract.pytesseract.tesseract_cmd = _find_tesseract()
+    _check_ocr_langs(lang, pytesseract.get_languages(config=''))
+
+    try:
+        source = fitz.open(input_path)
+    except Exception as e:
+        raise ValueError(f"'{input_path}' could not be opened as a PDF: {e}")
+
+    writer = PdfWriter()
+    with source:
+        if source.needs_pass:
+            raise ValueError(f"'{input_path}' is password-protected")
+
+        for number, page in enumerate(source, start=1):
+            logger.info("OCR page %d of %d", number, source.page_count)
+            pixmap = page.get_pixmap(dpi=dpi)
+            image = Image.open(io.BytesIO(pixmap.tobytes('png')))
+            page_pdf = pytesseract.image_to_pdf_or_hocr(image, extension='pdf', lang=lang)
+            for ocr_page in PdfReader(io.BytesIO(page_pdf)).pages:
+                writer.add_page(ocr_page)
+
+    writer.add_metadata(_SANITIZED_METADATA)
+
+    with open(output_path, 'wb') as output_file:
+        writer.write(output_file)
+
+    print(f"Successfully sanitized '{input_path}' and saved as '{output_path}'")
+
+
+def _check_ocr_langs(lang: str, installed: list[str]) -> None:
+    """Raises ValueError unless every language in `lang` is installed."""
+    missing = [code for code in lang.split('+') if code not in installed]
+    if missing:
+        raise ValueError(
+            f"Tesseract language data not installed: {', '.join(missing)}. "
+            f"Install it with 'apt-get install -y tesseract-ocr-{missing[0]}' "
+            f"(installed: {', '.join(sorted(installed)) or 'none'})"
+        )
+
+
+def _find_tesseract() -> str:
+    """Locates the Tesseract binary, or explains how to install it."""
+    candidate = os.environ.get("TESSERACT_CMD")
+    if candidate and shutil.which(candidate):
+        return candidate
+
+    found = shutil.which("tesseract")
+    if found:
+        return found
+
+    raise RuntimeError(
+        "Tesseract is required to sanitize PDFs but was not found. Install it "
+        "with 'apt-get install -y tesseract-ocr tesseract-ocr-heb' (Linux), "
+        "'brew install tesseract tesseract-lang' (macOS) or the UB-Mannheim "
+        "installer (Windows), or set TESSERACT_CMD to the binary's path."
+    )
+
+
+def scrub_pdf(input_path: str, output_path: str) -> None:
+    """
+    Strips hidden data from a PDF while keeping its real text and fonts.
+
+    Removes the info dictionary and XMP metadata, invisible text, JavaScript,
+    attached and embedded files, links, thumbnails, annotations and form
+    fields, then rewrites the file without unreferenced objects or earlier
+    revisions. Unlike `sanitize_pdf` nothing is rasterized, so it is fast and
+    lossless, but anything hidden by other means (white text, text under
+    images, off-page content) survives.
+
+    Args:
+        input_path (str): Path to the input PDF file
+        output_path (str): Path to save the scrubbed PDF file
+    """
+    try:
+        document = fitz.open(input_path)
+    except Exception as e:
+        raise ValueError(f"'{input_path}' could not be opened as a PDF: {e}")
+
+    with document:
+        if document.needs_pass:
+            raise ValueError(f"'{input_path}' is password-protected")
+
+        # scrub()'s own hidden_text pass matches content-stream lines, but
+        # clean_contents() in current MuPDF writes the whole stream on one
+        # line, so invisible text slips through. Redact it ourselves.
+        for page in document:
+            _remove_invisible_text(page)
+        document.scrub(hidden_text=False)
+
+        for page in document:
+            for widget in list(page.widgets()):
+                page.delete_widget(widget)
+            while page.first_annot:
+                page.delete_annot(page.first_annot)
+
+        # A full rewrite with garbage collection drops the objects scrubbing
+        # orphaned, along with any earlier incremental-update revisions.
+        document.save(output_path, garbage=4, deflate=True, clean=True)
+
+    print(f"Successfully scrubbed '{input_path}' and saved as '{output_path}'")
+
+
+def _remove_invisible_text(page) -> None:
+    """Deletes text drawn invisibly (render mode 3 or fully transparent)."""
+    hidden = [
+        span['bbox'] for span in page.get_texttrace()
+        if span['type'] == 3 or span['opacity'] == 0
+    ]
+    if not hidden:
+        return
+
+    for bbox in hidden:
+        page.add_redact_annot(fitz.Rect(bbox), fill=False)
+    # Text only: images and vector graphics under the hidden text stay intact.
+    page.apply_redactions(
+        images=fitz.PDF_REDACT_IMAGE_NONE,
+        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+        text=fitz.PDF_REDACT_TEXT_REMOVE,
     )
