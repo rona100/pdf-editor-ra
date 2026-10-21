@@ -18,3 +18,7 @@ frontend/.vite/
 /*.pdf
 /*.docx
 *:Zone.Identifier
+
+# Local tooling state
+.coverage
+.claude/.last-green-tests

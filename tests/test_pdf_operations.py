@@ -20,6 +20,8 @@ from pdf_editor.pdf_operations import (
 )
 from test_rtl import HEBREW_FONT, needs_hebrew_font
 
+FIXTURES = Path(__file__).parent / 'fixtures'
+
 needs_soffice = pytest.mark.skipif(
     shutil.which('soffice') is None and shutil.which('libreoffice') is None,
     reason='LibreOffice is not installed',
@@ -584,6 +586,24 @@ class TestConvertRTL:
             os.unlink(input_pdf)
             if os.path.exists(output_docx):
                 os.unlink(output_docx)
+
+    def test_ltr_output_is_identical_with_rtl_off(self, tmp_path):
+        """
+        Golden guard for the RTL gating: on a left-to-right document, 'auto'
+        must produce exactly what 'off' does, part for part.
+
+        Compares the archive members rather than the .docx bytes, since the
+        zip container stamps each member with the time it was written.
+        """
+        auto_docx = tmp_path / 'auto.docx'
+        off_docx = tmp_path / 'off.docx'
+        convert_pdf_to_docx(str(FIXTURES / 'ltr.pdf'), str(auto_docx))
+        convert_pdf_to_docx(str(FIXTURES / 'ltr.pdf'), str(off_docx), rtl='off')
+
+        with zipfile.ZipFile(auto_docx) as auto, zipfile.ZipFile(off_docx) as off:
+            assert auto.namelist() == off.namelist()
+            for name in auto.namelist():
+                assert auto.read(name) == off.read(name), name
 
     @needs_hebrew_font
     def test_hebrew_pdf_gets_rtl_markup(self):
