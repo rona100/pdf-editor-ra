@@ -3,9 +3,28 @@ import { FileDropzone } from '../components/FileDropzone'
 import { OperationResult } from '../components/OperationResult'
 import { useOperation } from '../hooks/useOperation'
 
+type Mode = 'ocr' | 'basic' | 'ats'
+
+const MODE_NOTES: Record<Mode, string> = {
+  ocr:
+    'Every page is rebuilt as an image with a fresh OCR text layer, and the metadata is ' +
+    'blanked. Hidden text, fonts, annotations and attachments are removed. The text stays ' +
+    'searchable but is no longer editable, may contain OCR errors, and the file grows. ' +
+    'OCR takes a few seconds per page.',
+  basic:
+    'Keeps the original text and fonts. Removes metadata, annotations, form fields, hidden ' +
+    'text (invisible, transparent or clipped away), JavaScript, attachments and links. Text ' +
+    'hidden by other means, such as white text or text under an image, is not detected.',
+  ats:
+    'Does everything Basic does, then rebuilds the text so copy-paste and applicant tracking ' +
+    'systems read it top to bottom. The page looks the same, but its text is drawn as shapes ' +
+    'under an invisible copy of the exact text, so it can no longer be edited: change the ' +
+    'source document and run it again.',
+}
+
 export function SanitizeOperation() {
   const [file, setFile] = useState<File | null>(null)
-  const [mode, setMode] = useState<'ocr' | 'basic'>('ocr')
+  const [mode, setMode] = useState<Mode>('ocr')
   const [lang, setLang] = useState('eng+heb')
   const { state, error, filename, execute } = useOperation()
 
@@ -42,11 +61,12 @@ export function SanitizeOperation() {
         <select
           id="sanitize-mode"
           value={mode}
-          onChange={(e) => setMode(e.target.value as 'ocr' | 'basic')}
+          onChange={(e) => setMode(e.target.value as Mode)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="ocr">Full: rebuild pages as images with OCR</option>
           <option value="basic">Basic: strip metadata, annotations and hidden text</option>
+          <option value="ats">ATS: basic, then rebuild the text in reading order</option>
         </select>
       </div>
 
@@ -70,20 +90,7 @@ export function SanitizeOperation() {
 
       <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
         <p className="font-medium">Note:</p>
-        {mode === 'ocr' ? (
-          <p>
-            Every page is rebuilt as an image with a fresh OCR text layer, and the metadata is
-            blanked. Hidden text, fonts, annotations and attachments are removed. The text stays
-            searchable but is no longer editable, may contain OCR errors, and the file grows.
-            OCR takes a few seconds per page.
-          </p>
-        ) : (
-          <p>
-            Keeps the original text and fonts. Removes metadata, annotations, form fields,
-            invisible text, JavaScript, attachments and links. Text hidden by other means, such
-            as white text or text under an image, is not detected.
-          </p>
-        )}
+        <p>{MODE_NOTES[mode]}</p>
       </div>
 
       <button

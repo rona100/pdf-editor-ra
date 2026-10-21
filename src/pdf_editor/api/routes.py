@@ -7,6 +7,7 @@ from ..pdf_operations import (
     RTL_MODES,
     SANITIZE_DEFAULT_LANG,
     SANITIZE_MODES,
+    ats_pdf,
     convert_docx_to_pdf,
     convert_pdf_to_docx,
     merge_pdfs,
@@ -227,6 +228,8 @@ async def sanitize(
         try:
             if mode == "basic":
                 scrub_pdf(str(input_path), str(output_path))
+            elif mode == "ats":
+                ats_pdf(str(input_path), str(output_path))
             else:
                 sanitize_pdf(str(input_path), str(output_path), lang=lang)
         except ValueError as e:

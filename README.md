@@ -9,7 +9,8 @@ Supported operations:
 - **Convert** PDFs to Microsoft Word DOCX format, with right-to-left (Hebrew, Arabic) repair
 - **Convert** DOCX files back to PDF
 - **Sanitize** a PDF: rebuild every page as an image with a fresh OCR text layer and blank metadata,
-  or (`--mode basic`) strip metadata, annotations and hidden text while keeping the original text
+  or (`--mode basic`) strip metadata, annotations and hidden text while keeping the original text,
+  or (`--mode ats`) also rebuild the text so applicant tracking systems read it in order
 
 ## Quick Start
 
@@ -47,6 +48,9 @@ uv run python -m pdf_editor sanitize document.pdf -o clean.pdf
 
 # Sanitize without OCR: strip metadata, annotations and hidden text only
 uv run python -m pdf_editor sanitize document.pdf -o clean.pdf --mode basic
+
+# Prepare a CV for applicant tracking systems: hidden data removed, text in reading order
+uv run python -m pdf_editor sanitize cv.pdf -o cv-clean.pdf --mode ats
 ```
 
 ## Requirements
@@ -93,7 +97,7 @@ uv run python -m pdf_editor convert <input> -o <output> [--rtl auto|on|off]
 uv run python -m pdf_editor docx2pdf <input> -o <output> [--timeout 120]
 
 # Sanitize a PDF (OCR languages default to eng+heb)
-uv run python -m pdf_editor sanitize <input> -o <output> [--mode ocr|basic] [--lang eng+heb] [--dpi 300]
+uv run python -m pdf_editor sanitize <input> -o <output> [--mode ocr|basic|ats] [--lang eng+heb] [--dpi 300]
 
 # Help
 uv run python -m pdf_editor --help
@@ -140,7 +144,7 @@ Open **http://localhost:5173** (Vite dev server proxies `/api` to the backend).
 | `POST /api/order` | `file`, `num_pages`, `new_order` (e.g. `"1,3,2"`) | PDF |
 | `POST /api/convert` | `file`, `rtl` (`auto`\|`on`\|`off`, default `auto`) | DOCX |
 | `POST /api/docx2pdf` | `file` | PDF |
-| `POST /api/sanitize` | `file`, `mode` (`ocr`\|`basic`, default `ocr`), `lang` (default `eng+heb`) | PDF |
+| `POST /api/sanitize` | `file`, `mode` (`ocr`\|`basic`\|`ats`, default `ocr`), `lang` (default `eng+heb`) | PDF |
 
 ```bash
 curl -X POST http://localhost:8000/api/rotate \
@@ -187,6 +191,20 @@ cd frontend && npm run test:coverage
   with every metadata field blanked. Hidden text, fonts, annotations and attachments do not
   survive. The text stays searchable and selectable but is no longer editable.
   `--mode basic` skips rasterizing: it uses PyMuPDF to remove metadata (info and XMP),
-  annotations, form fields, invisible text, JavaScript, attachments, links and thumbnails, then
-  rewrites the file with garbage collection. It needs no Tesseract and keeps the original text,
-  but text hidden by other means (white text, text under images) survives.
+  annotations, form fields, JavaScript, attachments, links and thumbnails, then rewrites the
+  file with garbage collection. It also removes hidden text: invisible or transparent text, text
+  in a hidden layer, and text clipped away, which is how PDF editors "delete" a region while
+  leaving its text in the file. A MuPDF device records which glyphs land inside the active clip,
+  and a content-stream filter drops the rest. It needs no Tesseract and keeps the original text,
+  but text that is drawn yet obscured (white text, text under images) survives.
+  `--mode ats` does what basic does, then redraws each page's visible text as vector outlines
+  under an invisible text layer holding exactly that text, one line at a time in reading order.
+  Copy-paste and ATS parsers that read in drawing order (PDFBox/Tika, pdfminer, pypdf) then get
+  the page top to bottom. Blocks are ordered by XY-cut, so columns of running text are read one
+  after the other while dates beside titles, or labels beside values, are read row by row. The
+  layer uses an embedded blank font, as OCR'd PDFs do; right-to-left lines are stored in logical
+  order. The page looks the same, but its text can no longer be edited, so edit the source
+  document and run it again. Known limits: in right-to-left table rows (a label cell beside a
+  value cell) extractors may join the cells in a different order than in the original, and
+  Hebrew or Arabic with vowel marks can come out split into fragments. `ats_pdf` warns when a
+  page's rebuilt text does not match its visible text.

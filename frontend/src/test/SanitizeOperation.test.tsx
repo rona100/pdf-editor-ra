@@ -46,6 +46,27 @@ describe('SanitizeOperation', () => {
     expect(body.get('lang')).toBe('eng')
   })
 
+  it('sends ats mode without a language and explains the trade-off', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['%PDF-1.4'], { type: 'application/pdf' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = render(<SanitizeOperation />)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, makePdfFile())
+    await userEvent.selectOptions(screen.getByLabelText('Mode'), 'ats')
+    expect(screen.queryByLabelText('OCR languages')).not.toBeInTheDocument()
+    expect(screen.getByText(/applicant tracking systems/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Sanitize PDF' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const body = fetchMock.mock.calls[0][1].body as FormData
+    expect(body.get('mode')).toBe('ats')
+    expect(body.get('lang')).toBeNull()
+  })
+
   it('sends basic mode without a language and hides the language field', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

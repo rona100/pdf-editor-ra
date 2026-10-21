@@ -312,3 +312,15 @@ class TestCLISanitize:
             os.unlink(input_pdf)
             if os.path.exists(output_pdf):
                 os.unlink(output_pdf)
+
+    def test_sanitize_ats_mode_rebuilds_text(self):
+        input_pdf = make_test_pdf(pages=2)
+        output_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False).name
+        try:
+            result = run_cli("sanitize", input_pdf, "-o", output_pdf, "--mode", "ats")
+            assert result.returncode == 0, result.stderr
+            assert len(PdfReader(output_pdf).pages) == 2
+        finally:
+            os.unlink(input_pdf)
+            if os.path.exists(output_pdf):
+                os.unlink(output_pdf)
