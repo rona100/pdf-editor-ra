@@ -4,11 +4,12 @@ import { MergeOperation } from './operations/MergeOperation'
 import { OrderOperation } from './operations/OrderOperation'
 import { ConvertOperation } from './operations/ConvertOperation'
 import { Docx2PdfOperation } from './operations/Docx2PdfOperation'
+import { SanitizeOperation } from './operations/SanitizeOperation'
 import { FileText } from 'lucide-react'
 
 function App() {
   const [activeTab, setActiveTab] = useState<
-    'rotate' | 'merge' | 'order' | 'convert' | 'docx2pdf'
+    'rotate' | 'merge' | 'order' | 'convert' | 'docx2pdf' | 'sanitize'
   >('rotate')
 
   const tabs = [
@@ -17,6 +18,7 @@ function App() {
     { id: 'order', label: 'Reorder Pages', icon: '↕️' },
     { id: 'convert', label: 'PDF to DOCX', icon: '📄' },
     { id: 'docx2pdf', label: 'DOCX to PDF', icon: '📕' },
+    { id: 'sanitize', label: 'Sanitize', icon: '🧼' },
   ] as const
 
   return (
@@ -28,7 +30,7 @@ function App() {
             <FileText className="w-8 h-8 text-blue-600" />
             <h1 className="text-3xl font-bold text-gray-900">PDF Editor</h1>
           </div>
-          <p className="text-gray-600">Rotate, merge, reorder, and convert PDF files</p>
+          <p className="text-gray-600">Rotate, merge, reorder, convert, and sanitize PDF files</p>
         </div>
       </div>
 
@@ -61,6 +63,7 @@ function App() {
           {activeTab === 'order' && <OrderOperation />}
           {activeTab === 'convert' && <ConvertOperation />}
           {activeTab === 'docx2pdf' && <Docx2PdfOperation />}
+          {activeTab === 'sanitize' && <SanitizeOperation />}
         </div>
       </div>
 

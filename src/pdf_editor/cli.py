@@ -4,18 +4,22 @@ import argparse
 import sys
 from .pdf_operations import (
     RTL_MODES,
+    SANITIZE_DEFAULT_LANG,
+    SANITIZE_MODES,
     convert_docx_to_pdf,
     convert_pdf_to_docx,
     merge_pdfs,
     order_pdf_pages,
     rotate_pdf_pages,
+    sanitize_pdf,
+    scrub_pdf,
 )
 
 
 def main() -> None:
     """Main entry point for the PDF Editor CLI."""
     parser = argparse.ArgumentParser(
-        description="PDF Editor - Rotate pages, merge PDF files, reorder pages, or convert between PDF and DOCX",
+        description="PDF Editor - Rotate pages, merge PDF files, reorder pages, convert between PDF and DOCX, or sanitize a PDF",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -228,6 +232,67 @@ NOTES:
         help="Seconds to wait for LibreOffice (default: 120)"
     )
 
+    # Sanitize command
+    sanitize_parser = subparsers.add_parser(
+        'sanitize',
+        help='Strip hidden data, metadata and annotations from a PDF',
+        description="Remove hidden data from a PDF. The default 'ocr' mode rasterizes "
+                    "every page, OCRs it with Tesseract, and rebuilds the PDF with blank "
+                    "metadata: nothing but the visible page survives, and the text stays "
+                    "searchable. The 'basic' mode keeps the original text and fonts and "
+                    "strips metadata, annotations, form fields, invisible text, JavaScript, "
+                    "attachments, links and thumbnails.",
+        epilog="""
+EXAMPLES:
+  Sanitize a PDF (English and Hebrew OCR):
+    python -m pdf_editor sanitize document.pdf -o clean.pdf
+
+  OCR English only, at a lower resolution for speed:
+    python -m pdf_editor sanitize document.pdf -o clean.pdf --lang eng --dpi 200
+
+  Strip metadata, annotations and hidden text without OCR:
+    python -m pdf_editor sanitize document.pdf -o clean.pdf --mode basic
+
+NOTES:
+  - ocr mode requires Tesseract: apt-get install -y tesseract-ocr tesseract-ocr-heb
+    (macOS: brew install tesseract tesseract-lang; Windows: UB-Mannheim installer)
+  - Set TESSERACT_CMD to point at the binary if it is not on PATH
+  - ocr output is image-based: text is searchable and selectable, not editable
+  - basic mode needs no Tesseract, but text hidden by other means (white text,
+    text under images) survives it, and it removes an existing invisible OCR layer
+  - The original PDF file is not modified
+  - If output file exists, it will be overwritten
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sanitize_parser.add_argument(
+        "input_pdf",
+        help="Path to the input PDF file"
+    )
+    sanitize_parser.add_argument(
+        "-o", "--output",
+        dest="output_pdf",
+        default="sanitized.pdf",
+        help="Path to save the sanitized PDF file (default: sanitized.pdf)"
+    )
+    sanitize_parser.add_argument(
+        "-m", "--mode",
+        choices=SANITIZE_MODES,
+        default="ocr",
+        help="ocr: rasterize and OCR every page; basic: strip hidden data only (default: ocr)"
+    )
+    sanitize_parser.add_argument(
+        "-l", "--lang",
+        default=SANITIZE_DEFAULT_LANG,
+        help=f"Tesseract OCR languages joined by '+', ocr mode only (default: {SANITIZE_DEFAULT_LANG})"
+    )
+    sanitize_parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Resolution to rasterize pages at, ocr mode only (default: 300)"
+    )
+
     args = parser.parse_args()
 
     if args.command == 'rotate':
@@ -254,6 +319,16 @@ NOTES:
     elif args.command == 'docx2pdf':
         try:
             convert_docx_to_pdf(args.input_docx, args.output_pdf, timeout=args.timeout)
+        except (RuntimeError, ValueError) as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    elif args.command == 'sanitize':
+        try:
+            if args.mode == 'basic':
+                scrub_pdf(args.input_pdf, args.output_pdf)
+            else:
+                sanitize_pdf(args.input_pdf, args.output_pdf, lang=args.lang, dpi=args.dpi)
         except (RuntimeError, ValueError) as e:
             print(f"Error: {e}")
             sys.exit(1)

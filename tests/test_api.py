@@ -17,6 +17,11 @@ needs_soffice = pytest.mark.skipif(
     reason="LibreOffice is not installed",
 )
 
+needs_tesseract = pytest.mark.skipif(
+    shutil.which("tesseract") is None,
+    reason="Tesseract is not installed",
+)
+
 
 def make_pdf_bytes(pages: int = 2) -> bytes:
     writer = PdfWriter()
@@ -294,3 +299,49 @@ class TestDocx2PdfAPI:
     def test_docx2pdf_missing_file_returns_422(self):
         response = client.post("/api/docx2pdf")
         assert response.status_code == 422
+
+
+class TestSanitizeAPI:
+    @needs_tesseract
+    def test_sanitize_returns_pdf(self):
+        response = client.post(
+            "/api/sanitize",
+            files={"file": ("test.pdf", make_pdf_bytes(2), "application/pdf")},
+            data={"lang": "eng"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert "sanitized.pdf" in response.headers.get("content-disposition", "")
+        assert len(PdfReader(io.BytesIO(response.content)).pages) == 2
+
+    def test_sanitize_rejects_malformed_lang(self):
+        response = client.post(
+            "/api/sanitize",
+            files={"file": ("test.pdf", make_pdf_bytes(1), "application/pdf")},
+            data={"lang": "eng; rm -rf /"},
+        )
+        assert response.status_code == 422
+        assert "Invalid OCR language" in response.json()["detail"]
+
+    def test_sanitize_missing_file_returns_422(self):
+        response = client.post("/api/sanitize")
+        assert response.status_code == 422
+
+    def test_sanitize_basic_mode_returns_pdf(self):
+        response = client.post(
+            "/api/sanitize",
+            files={"file": ("test.pdf", make_pdf_bytes(2), "application/pdf")},
+            data={"mode": "basic"},
+        )
+        assert response.status_code == 200
+        assert "sanitized.pdf" in response.headers.get("content-disposition", "")
+        assert len(PdfReader(io.BytesIO(response.content)).pages) == 2
+
+    def test_sanitize_rejects_unknown_mode(self):
+        response = client.post(
+            "/api/sanitize",
+            files={"file": ("test.pdf", make_pdf_bytes(1), "application/pdf")},
+            data={"mode": "nuke"},
+        )
+        assert response.status_code == 422
+        assert "mode must be one of" in response.json()["detail"]

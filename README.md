@@ -8,6 +8,8 @@ Supported operations:
 - **Reorder** pages using a position mapping
 - **Convert** PDFs to Microsoft Word DOCX format, with right-to-left (Hebrew, Arabic) repair
 - **Convert** DOCX files back to PDF
+- **Sanitize** a PDF: rebuild every page as an image with a fresh OCR text layer and blank metadata,
+  or (`--mode basic`) strip metadata, annotations and hidden text while keeping the original text
 
 ## Quick Start
 
@@ -39,6 +41,12 @@ uv run python -m pdf_editor convert document.pdf -o output.docx
 
 # Convert DOCX back to PDF (requires LibreOffice)
 uv run python -m pdf_editor docx2pdf document.docx -o output.pdf
+
+# Sanitize: rasterize + OCR, strip hidden data and metadata (requires Tesseract)
+uv run python -m pdf_editor sanitize document.pdf -o clean.pdf
+
+# Sanitize without OCR: strip metadata, annotations and hidden text only
+uv run python -m pdf_editor sanitize document.pdf -o clean.pdf --mode basic
 ```
 
 ## Requirements
@@ -49,6 +57,9 @@ uv run python -m pdf_editor docx2pdf document.docx -o output.pdf
 - Node.js 18+ (only for frontend development)
 - LibreOffice (only for DOCX→PDF): `sudo apt-get install -y libreoffice-writer`.
   Already included in the Docker image. Set `SOFFICE_BIN` if the binary is not on `PATH`.
+- Tesseract (only for sanitize in the default `ocr` mode): `sudo apt-get install -y tesseract-ocr tesseract-ocr-heb`
+  (macOS: `brew install tesseract tesseract-lang`). Already included in the Docker image.
+  Set `TESSERACT_CMD` if the binary is not on `PATH`.
 
 ## Installation
 
@@ -80,6 +91,9 @@ uv run python -m pdf_editor convert <input> -o <output> [--rtl auto|on|off]
 
 # Convert DOCX to PDF
 uv run python -m pdf_editor docx2pdf <input> -o <output> [--timeout 120]
+
+# Sanitize a PDF (OCR languages default to eng+heb)
+uv run python -m pdf_editor sanitize <input> -o <output> [--mode ocr|basic] [--lang eng+heb] [--dpi 300]
 
 # Help
 uv run python -m pdf_editor --help
@@ -126,6 +140,7 @@ Open **http://localhost:5173** (Vite dev server proxies `/api` to the backend).
 | `POST /api/order` | `file`, `num_pages`, `new_order` (e.g. `"1,3,2"`) | PDF |
 | `POST /api/convert` | `file`, `rtl` (`auto`\|`on`\|`off`, default `auto`) | DOCX |
 | `POST /api/docx2pdf` | `file` | PDF |
+| `POST /api/sanitize` | `file`, `mode` (`ocr`\|`basic`, default `ocr`), `lang` (default `eng+heb`) | PDF |
 
 ```bash
 curl -X POST http://localhost:8000/api/rotate \
@@ -167,3 +182,11 @@ cd frontend && npm run test:coverage
   Override detection with `--rtl on|off`.
 - **DOCX→PDF** shells out to LibreOffice in headless mode. Each conversion gets a private
   user-profile directory so concurrent requests do not contend for a shared one.
+- **Sanitize** renders each page to a 300 DPI image with PyMuPDF, OCRs it with Tesseract
+  into a one-page PDF (image plus invisible text layer), and reassembles the pages with pypdf
+  with every metadata field blanked. Hidden text, fonts, annotations and attachments do not
+  survive. The text stays searchable and selectable but is no longer editable.
+  `--mode basic` skips rasterizing: it uses PyMuPDF to remove metadata (info and XMP),
+  annotations, form fields, invisible text, JavaScript, attachments, links and thumbnails, then
+  rewrites the file with garbage collection. It needs no Tesseract and keeps the original text,
+  but text hidden by other means (white text, text under images) survives.

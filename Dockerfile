@@ -12,8 +12,10 @@ WORKDIR /app
 
 # LibreOffice backs the DOCX to PDF conversion; fonts-dejavu gives it usable
 # glyph coverage for non-Latin scripts. writer only, not the full suite.
+# Tesseract with English and Hebrew data backs sanitize.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu \
+       tesseract-ocr tesseract-ocr-eng tesseract-ocr-heb \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install uv

@@ -8,13 +8,20 @@ describe('App', () => {
     expect(screen.getByText('PDF Editor')).toBeInTheDocument()
   })
 
-  it('renders all five operation tabs', () => {
+  it('renders all six operation tabs', () => {
     render(<App />)
     expect(screen.getByText('Rotate Pages')).toBeInTheDocument()
     expect(screen.getByText('Merge PDFs')).toBeInTheDocument()
     expect(screen.getByText('Reorder Pages')).toBeInTheDocument()
     expect(screen.getByText('PDF to DOCX')).toBeInTheDocument()
     expect(screen.getByText('DOCX to PDF')).toBeInTheDocument()
+    expect(screen.getByText('Sanitize')).toBeInTheDocument()
+  })
+
+  it('switches to the Sanitize operation', async () => {
+    render(<App />)
+    await userEvent.click(screen.getByText('Sanitize'))
+    expect(screen.getByLabelText('OCR languages')).toBeInTheDocument()
   })
 
   it('shows the Rotate operation by default', () => {

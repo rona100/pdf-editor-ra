@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 PDF Editor is a dual-mode application for manipulating PDF files:
-- **CLI Mode**: Command-line tool with five operations (rotate, merge, reorder, convert, docx2pdf)
+- **CLI Mode**: Command-line tool with six operations (rotate, merge, reorder, convert, docx2pdf, sanitize)
 - **Web Mode**: Browser-based UI with REST API backend (FastAPI) and React frontend
 
-Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, convert PDFs to DOCX (with right-to-left repair), convert DOCX to PDF.
+Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, convert PDFs to DOCX (with right-to-left repair), convert DOCX to PDF, sanitize a PDF (`ocr` mode: rasterize with PyMuPDF, OCR with Tesseract, blank metadata; `basic` mode: PyMuPDF scrub of metadata, annotations, form fields and invisible text).
 
 Topic-specific notes live in `.claude/rules/` and load when the matching files are touched: `conversion.md` (pdf2docx and RTL), `api.md`, `frontend.md` and `docker.md` (Docker and CI).
 
@@ -39,6 +39,7 @@ Use `/verify-conversion` to check PDF→DOCX output visually. Use the `rtl-revie
 ## System dependencies
 
 - LibreOffice (`libreoffice-writer`) is optional and only needed for DOCX→PDF. It is located via `shutil.which('soffice'/'libreoffice')` or the `SOFFICE_BIN` env var.
+- Tesseract (`tesseract-ocr`, plus `tesseract-ocr-heb` for the default `eng+heb`) is optional and only needed for sanitize's `ocr` mode. It is located via `shutil.which('tesseract')` or the `TESSERACT_CMD` env var.
 
 ## Testing gotchas
 
