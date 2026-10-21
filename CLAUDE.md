@@ -42,7 +42,8 @@ Key Dockerfile requirements (learned from debugging):
 
 - Page numbers in CLI/API are 1-based; pypdf uses 0-based internally (conversion in `pdf_operations`)
 - The `order_pdf_pages` function validates that reorder list is a permutation of 1 to num_pages
-- PDF to DOCX conversion can fail silently on complex PDFs and fall back to text extraction (loses formatting/layout)
+- pdf2docx skips a page whose layout it cannot build and still reports success, so a conversion that "worked" can be missing a page's content. `_convert_with_pdf2docx` passes `ignore_page_error=False` to turn that into an exception, retries once with a relaxed `min_border_clearance`, and only then falls back to text extraction (which keeps all the text and none of the layout)
+- pdf2docx can also drop content *without* raising — shaded regions and text boxes are the usual casualties — so `_warn_if_incomplete` compares the converted text against the PDF's lines and warns below 95%
 - RTL repair is gated on detection (`pdf_has_rtl`), so LTR documents produce byte-identical output to before the feature existed — keep it that way when changing `convert_pdf_to_docx`
 - RTL text substitution matches against exact and whitespace-normalized keys only; unmatched runs are left untouched rather than guessed at
 - `_repair_rtl` swallows its own exceptions on purpose: a converted document with unrepaired RTL beats losing the conversion

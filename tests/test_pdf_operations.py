@@ -374,6 +374,174 @@ class TestPDFOperations:
             os.unlink(pdf2)
 
 
+class TestConvertPageFailures:
+    """pdf2docx page failures must never cost content silently."""
+
+    def make_pdf(self, path, text='Some text'):
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), text, fontname='helv', fontsize=14)
+        doc.save(path)
+        doc.close()
+
+    def fake_converter(self, monkeypatch, outcomes):
+        """
+        Replaces pdf2docx's Converter with a stub driving `outcomes`.
+
+        Each outcome is either an exception to raise or None to succeed by
+        writing a minimal DOCX. Records the kwargs of every convert() call.
+        """
+        calls = []
+
+        class FakeConverter:
+            def __init__(self, input_path):
+                self.input_path = input_path
+
+            def convert(self, output_path, **kwargs):
+                calls.append(kwargs)
+                outcome = outcomes[len(calls) - 1]
+                if outcome is not None:
+                    raise outcome
+                Document().save(output_path)
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(pdf_operations, 'Converter', FakeConverter)
+        return calls
+
+    def test_page_errors_are_not_ignored(self, monkeypatch, tmp_path):
+        """
+        pdf2docx's default drops a failed page and still reports success.
+
+        Passing ignore_page_error=False is what makes the loss visible, so the
+        retry and fallback below can act on it.
+        """
+        calls = self.fake_converter(monkeypatch, [None])
+        input_pdf = tmp_path / 'in.pdf'
+        self.make_pdf(str(input_pdf))
+
+        convert_pdf_to_docx(str(input_pdf), str(tmp_path / 'out.docx'))
+
+        assert calls[0]['ignore_page_error'] is False
+
+    def test_retries_with_relaxed_layout_settings(self, monkeypatch, tmp_path):
+        """A page that trips the default layout analysis gets a second chance."""
+        calls = self.fake_converter(
+            monkeypatch, [RuntimeError('Failed to merge docx_cell'), None]
+        )
+        input_pdf = tmp_path / 'in.pdf'
+        output_docx = tmp_path / 'out.docx'
+        self.make_pdf(str(input_pdf))
+
+        convert_pdf_to_docx(str(input_pdf), str(output_docx))
+
+        assert len(calls) == 2
+        assert 'min_border_clearance' not in calls[0]
+        assert calls[1]['min_border_clearance'] == 5.0
+        assert output_docx.exists()
+
+    def test_falls_back_to_text_when_every_attempt_fails(self, monkeypatch, tmp_path):
+        """
+        Layout is expendable; text is not.
+
+        When no pdf2docx attempt produces a document, the fallback extraction
+        has to run so the output still carries the PDF's text.
+        """
+        self.fake_converter(
+            monkeypatch,
+            [RuntimeError('first'), RuntimeError('second')],
+        )
+        input_pdf = tmp_path / 'in.pdf'
+        output_docx = tmp_path / 'out.docx'
+        self.make_pdf(str(input_pdf), text='Marker text to preserve')
+
+        convert_pdf_to_docx(str(input_pdf), str(output_docx))
+
+        text = '\n'.join(p.text for p in Document(str(output_docx)).paragraphs)
+        assert 'Marker text to preserve' in text
+
+    def test_a_clean_conversion_is_not_retried(self, monkeypatch, tmp_path):
+        """The happy path must stay a single pass over the document."""
+        calls = self.fake_converter(monkeypatch, [None])
+        input_pdf = tmp_path / 'in.pdf'
+        self.make_pdf(str(input_pdf))
+
+        convert_pdf_to_docx(str(input_pdf), str(tmp_path / 'out.docx'))
+
+        assert len(calls) == 1
+
+    def test_coverage_is_total_when_the_text_all_arrives(self, tmp_path):
+        input_pdf = tmp_path / 'in.pdf'
+        output_docx = tmp_path / 'out.docx'
+        self.make_pdf(str(input_pdf), text='Alpha beta gamma delta')
+
+        document = Document()
+        document.add_paragraph('Alpha beta gamma delta')
+        document.save(str(output_docx))
+
+        assert pdf_operations._text_coverage(str(input_pdf), str(output_docx)) == 1.0
+
+    def test_coverage_notices_missing_text(self, tmp_path):
+        input_pdf = tmp_path / 'in.pdf'
+        output_docx = tmp_path / 'out.docx'
+        self.make_pdf(str(input_pdf), text='Alpha beta gamma delta')
+
+        Document().save(str(output_docx))
+
+        assert pdf_operations._text_coverage(str(input_pdf), str(output_docx)) == 0.0
+
+    def test_incomplete_output_is_reported(self, monkeypatch, tmp_path, capsys):
+        """Dropped content must be announced, not left for the user to find."""
+        self.fake_converter(monkeypatch, [None])  # writes an empty DOCX
+        input_pdf = tmp_path / 'in.pdf'
+        self.make_pdf(str(input_pdf), text='Content that will go missing')
+
+        convert_pdf_to_docx(str(input_pdf), str(tmp_path / 'out.docx'))
+
+        assert 'missing from the converted document' in capsys.readouterr().out
+
+    def test_a_complete_conversion_is_quiet(self, monkeypatch, tmp_path, capsys):
+        """The warning must not cry wolf on a conversion that lost nothing."""
+        input_pdf = tmp_path / 'in.pdf'
+        self.make_pdf(str(input_pdf), text='Everything here survives')
+
+        class FullConverter:
+            def __init__(self, input_path):
+                pass
+
+            def convert(self, output_path, **kwargs):
+                document = Document()
+                document.add_paragraph('Everything here survives')
+                document.save(output_path)
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(pdf_operations, 'Converter', FullConverter)
+        convert_pdf_to_docx(str(input_pdf), str(tmp_path / 'out.docx'))
+
+        assert 'missing from the converted document' not in capsys.readouterr().out
+
+    def test_a_broken_coverage_check_never_costs_the_conversion(
+        self, monkeypatch, tmp_path
+    ):
+        """The estimate is a diagnostic; it must not be able to fail a convert."""
+        self.fake_converter(monkeypatch, [None])
+        monkeypatch.setattr(
+            pdf_operations,
+            '_text_coverage',
+            lambda *_: (_ for _ in ()).throw(RuntimeError('boom')),
+        )
+        input_pdf = tmp_path / 'in.pdf'
+        output_docx = tmp_path / 'out.docx'
+        self.make_pdf(str(input_pdf))
+
+        convert_pdf_to_docx(str(input_pdf), str(output_docx))
+
+        assert output_docx.exists()
+
+
 class TestConvertRTL:
     """Right-to-left handling in convert_pdf_to_docx."""
 

@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 from .docx_rtl import apply_rtl
-from .rtl import build_line_corrections, pdf_has_rtl, reorder_line
+from .rtl import build_line_corrections, normalize, pdf_has_rtl, reorder_line
 
 
 def merge_pdfs(file1_path: str, file2_path: str, output_path: str) -> None:
@@ -150,18 +150,18 @@ def convert_pdf_to_docx(input_path: str, output_path: str, rtl: str = 'auto') ->
 
     try:
         # First try the standard pdf2docx conversion
-        cv = Converter(input_path)
-        cv.convert(output_path, start=0, end=None)
-        cv.close()
+        _convert_with_pdf2docx(input_path, output_path)
 
         if use_rtl:
             _repair_rtl(input_path, output_path)
+
+        _warn_if_incomplete(input_path, output_path)
 
         print(f"Successfully converted '{input_path}' to DOCX format and saved as '{output_path}'")
 
     except Exception as e:
         print(f"Standard conversion failed: {e}")
-        print("Attempting fallback text extraction method...")
+        print("Attempting fallback text extraction; text is preserved, layout is not...")
 
         try:
             # Fallback: Extract text using PyMuPDF and create a basic DOCX
@@ -171,6 +171,124 @@ def convert_pdf_to_docx(input_path: str, output_path: str, rtl: str = 'auto') ->
         except Exception as fallback_error:
             print(f"Fallback conversion also failed: {fallback_error}")
             raise RuntimeError(f"PDF conversion failed for '{input_path}'. The PDF may contain complex layouts or unsupported elements.")
+
+
+# pdf2docx skips a page whose layout analysis fails and still reports success,
+# so the conversion returns a document with that page's content simply absent.
+# ignore_page_error=False turns the skip into an exception, making the loss
+# visible and recoverable instead of silent.
+#
+# Each retry then relaxes one layout heuristic. min_border_clearance is how
+# close two table borders may sit before pdf2docx treats them as one; forms
+# with tightly packed rules trip its cell-merging logic, and giving it more
+# room is enough to get the page through with its layout intact.
+_PDF2DOCX_ATTEMPTS = (
+    {},
+    {'min_border_clearance': 5.0},
+)
+
+
+def _convert_with_pdf2docx(input_path: str, output_path: str) -> None:
+    """
+    Converts via pdf2docx, retrying with relaxed layout settings on failure.
+
+    Args:
+        input_path (str): Path to the input PDF file
+        output_path (str): Path to write the DOCX to
+
+    Raises:
+        Exception: The last attempt's error, if no attempt produced a complete
+            document. The caller falls back to plain text extraction, which
+            keeps all the text but none of the layout.
+    """
+    last_error = None
+
+    for attempt, settings in enumerate(_PDF2DOCX_ATTEMPTS, start=1):
+        converter = Converter(input_path)
+        try:
+            converter.convert(
+                output_path, start=0, end=None, ignore_page_error=False, **settings
+            )
+            return
+        except Exception as e:
+            last_error = e
+            if attempt < len(_PDF2DOCX_ATTEMPTS):
+                print(f"Layout analysis failed ({e}); retrying with relaxed settings")
+        finally:
+            converter.close()
+
+    raise last_error
+
+
+# Below this share of the PDF's text lines, the converted document is treated
+# as incomplete enough to be worth telling the user about. pdf2docx can drop
+# content without raising -- shaded regions and text boxes are the usual
+# casualties -- so a clean run is not by itself evidence of a complete result.
+_COVERAGE_THRESHOLD = 0.95
+
+
+def _text_coverage(input_path: str, output_path: str) -> float:
+    """
+    Returns the share of the PDF's text lines that reached the DOCX.
+
+    A line counts as present when most of its words appear anywhere in the
+    document, which tolerates the re-flowing and re-spacing a layout converter
+    legitimately does while still catching wholesale loss.
+
+    Args:
+        input_path (str): Path to the source PDF file
+        output_path (str): Path to the converted DOCX file
+    """
+    document = Document(output_path)
+    haystack = [paragraph.text for paragraph in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            haystack.extend(cell.text for cell in row.cells)
+    haystack = normalize(" ".join(haystack))
+
+    present = 0
+    total = 0
+
+    pdf = fitz.open(input_path)
+    try:
+        for page in pdf:
+            for block in page.get_text("rawdict")["blocks"]:
+                if block.get("type") != 0:  # skip images
+                    continue
+                for line in block["lines"]:
+                    chars = [c for span in line["spans"] for c in span["chars"]]
+                    words = [w for w in normalize(reorder_line(chars)).split() if len(w) > 1]
+                    if not words:
+                        continue
+                    total += 1
+                    found = sum(1 for word in words if word in haystack)
+                    if found / len(words) >= 0.7:
+                        present += 1
+    finally:
+        pdf.close()
+
+    return 1.0 if total == 0 else present / total
+
+
+def _warn_if_incomplete(input_path: str, output_path: str) -> None:
+    """
+    Prints a warning when the converted document is missing source text.
+
+    Never raises: the coverage estimate is a diagnostic, and failing to
+    compute it must not cost the user a conversion that otherwise worked.
+    """
+    try:
+        coverage = _text_coverage(input_path, output_path)
+    except Exception as e:
+        print(f"Could not check conversion completeness: {e}")
+        return
+
+    if coverage < _COVERAGE_THRESHOLD:
+        print(
+            f"Warning: about {round((1 - coverage) * 100)}% of the PDF's text lines "
+            f"are missing from the converted document. pdf2docx drops content it "
+            f"cannot lay out; the text is all recoverable from the PDF itself."
+        )
 
 
 def _repair_rtl(input_path: str, output_path: str) -> None:
