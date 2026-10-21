@@ -6,7 +6,6 @@ This script creates test PDFs and runs basic operations.
 
 import tempfile
 import os
-from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 # Import the functions to test

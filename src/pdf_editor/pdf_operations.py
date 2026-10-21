@@ -4,7 +4,6 @@ from pypdf import PdfReader, PdfWriter
 from pdf2docx import Converter
 import fitz  # PyMuPDF
 from docx import Document
-from docx.shared import Inches
 import os
 import shutil
 import subprocess
