@@ -1,3 +1,4 @@
+import io
 import pytest
 import shutil
 import tempfile
@@ -17,6 +18,7 @@ from pdf_editor.pdf_operations import (
     merge_pdfs,
     order_pdf_pages,
     rotate_pdf_pages,
+    ats_pdf,
     sanitize_pdf,
     scrub_pdf,
 )
@@ -912,6 +914,39 @@ def make_dirty_pdf(path: Path) -> None:
     document.close()
 
 
+def make_clipped_edit_pdf(tmp_path: Path) -> Path:
+    """
+    Mimics an editor deleting a line: the page is drawn twice through clipped
+    form XObjects that skip the line and close the gap, but the line's text
+    is still in the file.
+    """
+    original = tmp_path / 'original.pdf'
+    source = fitz.open()
+    page = source.new_page()
+    page.insert_text((72, 100), 'Kept first line', fontsize=14)
+    page.insert_text((72, 130), 'Deleted secret line', fontsize=14)
+    page.insert_text((72, 160), 'Kept last line', fontsize=14)
+    source.save(original)
+    source.close()
+
+    edited = tmp_path / 'edited.pdf'
+    with fitz.open(original) as source:
+        document = fitz.open()
+        page = document.new_page()
+        width = page.rect.width
+        page.show_pdf_page(fitz.Rect(0, 0, width, 110), source, 0, clip=fitz.Rect(0, 0, width, 110))
+        page.show_pdf_page(fitz.Rect(0, 110, width, 812), source, 0, clip=fitz.Rect(0, 140, width, 842))
+        document.save(edited)
+        document.close()
+    return edited
+
+
+def drawn_text(path) -> str:
+    """Every character drawn on page 1, clipped or not, in drawing order."""
+    with fitz.open(path) as document:
+        return ''.join(chr(c[0]) for s in document[0].get_texttrace() for c in s['chars'])
+
+
 class TestScrubPdf:
     def test_scrub_strips_hidden_data_and_keeps_visible_text(self, tmp_path):
         source = tmp_path / 'source.pdf'
@@ -962,8 +997,229 @@ class TestScrubPdf:
             assert list(scrubbed[0].widgets()) == []
         assert b'123-45-6789' not in output.read_bytes()
 
+    def test_scrub_removes_text_deleted_by_clipping(self, tmp_path):
+        """
+        Editors often "delete" a region by redrawing the page twice through
+        clipped form XObjects that skip it. The text stays in the file and
+        copy-paste or an ATS parser still reads it.
+        """
+        edited = make_clipped_edit_pdf(tmp_path)
+        assert 'Deleted secret line' in drawn_text(edited)
+
+        output = tmp_path / 'scrubbed.pdf'
+        scrub_pdf(str(edited), str(output))
+
+        drawn = drawn_text(output)
+        assert 'Deleted secret line' not in drawn
+        assert drawn.count('Kept first line') == 1
+        assert drawn.count('Kept last line') == 1
+        assert 'Deleted' not in PdfReader(str(output)).pages[0].extract_text()
+
+    def test_scrub_removes_transparent_text(self, tmp_path):
+        source = tmp_path / 'source.pdf'
+        output = tmp_path / 'scrubbed.pdf'
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 100), 'Visible text', fontsize=20)
+        page.insert_text((72, 200), 'Transparent keywords', fontsize=20, fill_opacity=0)
+        document.save(source)
+        document.close()
+
+        scrub_pdf(str(source), str(output))
+
+        with fitz.open(output) as scrubbed:
+            assert scrubbed[0].get_text().strip() == 'Visible text'
+
     def test_scrub_rejects_non_pdf(self, tmp_path):
         bogus = tmp_path / 'bogus.pdf'
         bogus.write_bytes(b'not a pdf')
         with pytest.raises(ValueError):
             scrub_pdf(str(bogus), str(tmp_path / 'out.pdf'))
+
+
+def render_difference(first, second) -> float:
+    """Share of pixels on page 1 that differ clearly between two PDFs."""
+    from PIL import Image, ImageChops
+    images = []
+    for path in (first, second):
+        with fitz.open(path) as document:
+            images.append(Image.open(io.BytesIO(document[0].get_pixmap(dpi=100).tobytes('png'))).convert('L'))
+    histogram = ImageChops.difference(*images).histogram()
+    return sum(histogram[65:]) / (images[0].width * images[0].height)
+
+
+class TestAtsPdf:
+    def test_text_layer_follows_reading_order(self, tmp_path):
+        """The file draws the lower line first; extraction must still read top down."""
+        source = tmp_path / 'source.pdf'
+        output = tmp_path / 'ats.pdf'
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 300), 'Second line drawn first', fontsize=14)
+        page.insert_text((72, 100), 'First line drawn last', fontsize=14)
+        document.save(source)
+        document.close()
+
+        # pypdf reads in drawing order, like copy-paste and many ATS parsers.
+        assert PdfReader(str(source)).pages[0].extract_text().startswith('Second')
+
+        ats_pdf(str(source), str(output))
+
+        lines = PdfReader(str(output)).pages[0].extract_text().splitlines()
+        assert lines == ['First line drawn last', 'Second line drawn first']
+
+    def test_removes_hidden_text_and_the_original_fonts(self, tmp_path):
+        source = tmp_path / 'source.pdf'
+        output = tmp_path / 'ats.pdf'
+        make_dirty_pdf(source)
+
+        ats_pdf(str(source), str(output))
+
+        assert PdfReader(str(output)).pages[0].extract_text().strip() == 'Visible text'
+        with fitz.open(output) as rebuilt:
+            fonts = rebuilt[0].get_fonts(full=True)
+            assert [font[3] for font in fonts] == ['GlyphLessFont']
+            # Embedded: PDF editors warn about a font they cannot find.
+            assert rebuilt.extract_font(fonts[0][0])[3]
+            assert all(not value for key, value in rebuilt.metadata.items() if key != 'format')
+
+    def test_removes_text_deleted_by_clipping(self, tmp_path):
+        edited = make_clipped_edit_pdf(tmp_path)
+        output = tmp_path / 'ats.pdf'
+
+        ats_pdf(str(edited), str(output))
+
+        text = PdfReader(str(output)).pages[0].extract_text()
+        assert 'Deleted' not in text
+        assert text.splitlines() == ['Kept first line', 'Kept last line']
+
+    def test_page_looks_the_same(self, tmp_path):
+        output = tmp_path / 'ats.pdf'
+
+        ats_pdf(str(FIXTURES / 'ltr.pdf'), str(output))
+
+        # Outlines and font rendering anti-alias edges a little differently.
+        assert render_difference(FIXTURES / 'ltr.pdf', output) < 0.01
+        with fitz.open(FIXTURES / 'ltr.pdf') as original, fitz.open(output) as rebuilt:
+            assert rebuilt[0].get_text() == original[0].get_text()
+
+    def test_right_to_left_text_keeps_its_words(self, tmp_path):
+        for name in ('hebrew.pdf', 'mixed.pdf', 'textbox.pdf'):
+            output = tmp_path / name
+
+            ats_pdf(str(FIXTURES / name), str(output))
+
+            with fitz.open(FIXTURES / name) as original, fitz.open(output) as rebuilt:
+                assert sorted(rebuilt[0].get_text().split()) == sorted(original[0].get_text().split()), name
+
+    def test_glyphless_font_is_a_valid_truetype_font(self):
+        from pdf_editor.page_text import _glyphless_truetype
+
+        font = fitz.Font(fontbuffer=_glyphless_truetype())
+        assert font.name.startswith('GlyphLessFont')
+        assert font.glyph_count == 2
+
+    def test_columns_are_read_one_after_the_other(self, tmp_path):
+        source = tmp_path / 'columns.pdf'
+        output = tmp_path / 'ats.pdf'
+        filler = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron'
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_textbox(fitz.Rect(50, 100, 280, 200), 'LEFTONE ' + filler, fontsize=10)
+        page.insert_textbox(fitz.Rect(320, 100, 550, 200), 'RIGHTONE ' + filler, fontsize=10)
+        page.insert_textbox(fitz.Rect(50, 210, 280, 300), 'LEFTTWO ' + filler, fontsize=10)
+        page.insert_textbox(fitz.Rect(320, 210, 550, 300), 'RIGHTTWO ' + filler, fontsize=10)
+        document.save(source)
+        document.close()
+
+        ats_pdf(str(source), str(output))
+
+        text = PdfReader(str(output)).pages[0].extract_text()
+        markers = ['LEFTONE', 'LEFTTWO', 'RIGHTONE', 'RIGHTTWO']
+        assert sorted(markers, key=text.index) == markers
+
+    def test_dates_beside_titles_are_read_row_by_row(self, tmp_path):
+        """A narrow column of dates beside job titles is a table, not two columns."""
+        source = tmp_path / 'cv.pdf'
+        output = tmp_path / 'ats.pdf'
+        document = fitz.open()
+        page = document.new_page()
+        for top, (dates, title) in zip((100, 160), [('2020 - 2024', 'Senior Engineer'), ('2016 - 2020', 'Engineer')]):
+            page.insert_text((50, top), dates, fontsize=9)
+            page.insert_text((130, top), title, fontsize=11)
+            page.insert_text((130, top + 15), f'Did things as {title}', fontsize=9)
+        document.save(source)
+        document.close()
+
+        ats_pdf(str(source), str(output))
+
+        text = PdfReader(str(output)).pages[0].extract_text()
+        markers = ['2020 - 2024', 'Senior Engineer', '2016 - 2020', 'Did things as Engineer']
+        assert sorted(markers, key=text.index) == markers
+
+    @needs_hebrew_font
+    def test_right_to_left_columns_are_read_right_first(self, tmp_path):
+        source = tmp_path / 'columns.pdf'
+        output = tmp_path / 'ats.pdf'
+        filler = 'זהו טקסט ארוך בעברית שנועד למלא כמה שורות בתוך הטור כדי לבדוק את סדר הקריאה'
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_htmlbox(fitz.Rect(320, 100, 550, 260), f'<p dir="rtl">ימני {filler}</p>')
+        page.insert_htmlbox(fitz.Rect(50, 100, 280, 260), f'<p dir="rtl">שמאלי {filler}</p>')
+        document.save(source)
+        document.close()
+
+        ats_pdf(str(source), str(output))
+
+        with fitz.open(output) as rebuilt:
+            text = rebuilt[0].get_text()
+        assert text.index('ימני') < text.index('שמאלי')
+
+    @needs_hebrew_font
+    def test_rotated_right_to_left_line_keeps_its_words(self, tmp_path):
+        line = tmp_path / 'line.pdf'
+        source = tmp_path / 'rotated.pdf'
+        output = tmp_path / 'ats.pdf'
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_htmlbox(fitz.Rect(50, 50, 400, 100), '<p dir="rtl">שלום עולם טל: 03-9377218 סוף</p>')
+        document.save(line)
+        document.close()
+        with fitz.open(line) as single:
+            document = fitz.open()
+            document.new_page().show_pdf_page(fitz.Rect(50, 50, 500, 700), single, 0, rotate=90)
+            document.save(source)
+            document.close()
+
+        ats_pdf(str(source), str(output))
+
+        with fitz.open(source) as original, fitz.open(output) as rebuilt:
+            assert sorted(rebuilt[0].get_text().split()) == sorted(original[0].get_text().split())
+
+    def test_lone_surrogate_from_a_broken_tounicode_map_does_not_crash(self, tmp_path):
+        source = tmp_path / 'broken.pdf'
+        output = tmp_path / 'ats.pdf'
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 100), 'ABC Hello', fontsize=14)
+        document.save(source)
+        document.close()
+        # Point the font's ToUnicode entry for 'A' at a lone high surrogate.
+        with fitz.open(source) as document:
+            font_xref = document[0].get_fonts()[0][0]
+            cmap = document.get_new_xref()
+            document.update_object(cmap, '<<>>')
+            document.update_stream(cmap, (
+                b'/CIDInit /ProcSet findresource begin 12 dict begin begincmap '
+                b'/CMapName /Broken def 1 begincodespacerange <00> <FF> endcodespacerange '
+                b'1 beginbfchar <41> <D800> endbfchar endcmap CMapName currentdict /CMap '
+                b'defineresource pop end end'
+            ))
+            document.xref_set_key(font_xref, 'ToUnicode', f'{cmap} 0 R')
+            document.save(tmp_path / 'broken2.pdf')
+
+        ats_pdf(str(tmp_path / 'broken2.pdf'), str(output))
+
+        with fitz.open(output) as rebuilt:
+            text = rebuilt[0].get_text()
+        assert 'Hello' in text and '�' in text

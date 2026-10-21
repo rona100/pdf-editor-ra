@@ -8,7 +8,7 @@ PDF Editor is a dual-mode application for manipulating PDF files:
 - **CLI Mode**: Command-line tool with six operations (rotate, merge, reorder, convert, docx2pdf, sanitize)
 - **Web Mode**: Browser-based UI with REST API backend (FastAPI) and React frontend
 
-Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, convert PDFs to DOCX (with right-to-left repair), convert DOCX to PDF, sanitize a PDF (`ocr` mode: rasterize with PyMuPDF, OCR with Tesseract, blank metadata; `basic` mode: PyMuPDF scrub of metadata, annotations, form fields and invisible text).
+Supported operations: rotate pages by 90/180/270°, merge PDFs, reorder pages, convert PDFs to DOCX (with right-to-left repair), convert DOCX to PDF, sanitize a PDF (`ocr` mode: rasterize with PyMuPDF, OCR with Tesseract, blank metadata; `basic` mode: PyMuPDF scrub of metadata, annotations, form fields and hidden text; `ats` mode: basic, then text redrawn as outlines under an invisible reading-order text layer). The MuPDF device and content-filter code for hidden text and the text layer lives in `page_text.py`.
 
 Topic-specific notes live in `.claude/rules/` and load when the matching files are touched: `conversion.md` (pdf2docx and RTL), `api.md`, `frontend.md` and `docker.md` (Docker and CI).
 

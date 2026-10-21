@@ -345,3 +345,13 @@ class TestSanitizeAPI:
         )
         assert response.status_code == 422
         assert "mode must be one of" in response.json()["detail"]
+
+    def test_sanitize_ats_mode_returns_pdf(self):
+        response = client.post(
+            "/api/sanitize",
+            files={"file": ("test.pdf", make_pdf_bytes(2), "application/pdf")},
+            data={"mode": "ats"},
+        )
+        assert response.status_code == 200
+        assert "sanitized.pdf" in response.headers.get("content-disposition", "")
+        assert len(PdfReader(io.BytesIO(response.content)).pages) == 2

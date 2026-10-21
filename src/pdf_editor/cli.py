@@ -6,6 +6,7 @@ from .pdf_operations import (
     RTL_MODES,
     SANITIZE_DEFAULT_LANG,
     SANITIZE_MODES,
+    ats_pdf,
     convert_docx_to_pdf,
     convert_pdf_to_docx,
     merge_pdfs,
@@ -240,8 +241,11 @@ NOTES:
                     "every page, OCRs it with Tesseract, and rebuilds the PDF with blank "
                     "metadata: nothing but the visible page survives, and the text stays "
                     "searchable. The 'basic' mode keeps the original text and fonts and "
-                    "strips metadata, annotations, form fields, invisible text, JavaScript, "
-                    "attachments, links and thumbnails.",
+                    "strips metadata, annotations, form fields, hidden text (invisible, "
+                    "transparent or clipped away), JavaScript, attachments, links and "
+                    "thumbnails. The 'ats' mode does what basic does, then rebuilds the text "
+                    "so copy-paste and ATS parsers read it in reading order: the page looks "
+                    "the same, but its text is drawn as shapes under an invisible text layer.",
         epilog="""
 EXAMPLES:
   Sanitize a PDF (English and Hebrew OCR):
@@ -253,6 +257,9 @@ EXAMPLES:
   Strip metadata, annotations and hidden text without OCR:
     python -m pdf_editor sanitize document.pdf -o clean.pdf --mode basic
 
+  Prepare a CV for applicant tracking systems (exact text, reading order):
+    python -m pdf_editor sanitize cv.pdf -o cv-clean.pdf --mode ats
+
 NOTES:
   - ocr mode requires Tesseract: apt-get install -y tesseract-ocr tesseract-ocr-heb
     (macOS: brew install tesseract tesseract-lang; Windows: UB-Mannheim installer)
@@ -260,6 +267,8 @@ NOTES:
   - ocr output is image-based: text is searchable and selectable, not editable
   - basic mode needs no Tesseract, but text hidden by other means (white text,
     text under images) survives it, and it removes an existing invisible OCR layer
+  - ats output looks the same but its text is no longer editable: edit the
+    source document and run it again
   - The original PDF file is not modified
   - If output file exists, it will be overwritten
         """,
@@ -279,7 +288,8 @@ NOTES:
         "-m", "--mode",
         choices=SANITIZE_MODES,
         default="ocr",
-        help="ocr: rasterize and OCR every page; basic: strip hidden data only (default: ocr)"
+        help="ocr: rasterize and OCR every page; basic: strip hidden data only; "
+             "ats: basic, then rebuild the text in reading order (default: ocr)"
     )
     sanitize_parser.add_argument(
         "-l", "--lang",
@@ -327,6 +337,8 @@ NOTES:
         try:
             if args.mode == 'basic':
                 scrub_pdf(args.input_pdf, args.output_pdf)
+            elif args.mode == 'ats':
+                ats_pdf(args.input_pdf, args.output_pdf)
             else:
                 sanitize_pdf(args.input_pdf, args.output_pdf, lang=args.lang, dpi=args.dpi)
         except (RuntimeError, ValueError) as e:

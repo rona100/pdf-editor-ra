@@ -105,12 +105,16 @@ def reorder_line(chars: list[dict]) -> str:
         str: The line in logical order. Lines without RTL characters are
         returned unchanged, so this is safe to call on any line.
     """
-    if not chars:
-        return ""
+    return "".join(c["c"] for c in logical_order(chars))
 
-    text = "".join(c["c"] for c in chars)
-    if not has_rtl(text):
-        return text
+
+def logical_order(chars: list[dict]) -> list[dict]:
+    """
+    Like `reorder_line`, but returns the character dicts themselves, so each
+    keeps its position on the page.
+    """
+    if not has_rtl("".join(c["c"] for c in chars)):
+        return list(chars)
 
     # Split into maximal runs of one character class.
     runs: list[list[dict]] = []
@@ -125,7 +129,7 @@ def reorder_line(chars: list[dict]) -> str:
     # Lay the runs out right-to-left, by the right edge of each run.
     runs.sort(key=lambda run: max(c["bbox"][2] for c in run), reverse=True)
 
-    return "".join("".join(c["c"] for c in run) for run in runs)
+    return [char for run in runs for char in run]
 
 
 def build_line_corrections(input_path: str) -> dict[str, str]:

@@ -181,7 +181,15 @@ With `--mode basic` nothing is rasterized. Instead, metadata (info and XMP), ann
 fields, invisible text, JavaScript, attachments, links and thumbnails are removed, and the file
 is rewritten without leftover objects or earlier revisions. The original text and fonts are
 kept, so this is fast and lossless, but text hidden by other means (white text, text under an
-image) survives, and an existing invisible OCR layer on a scanned PDF is removed.
+image) survives, and an existing invisible OCR layer on a scanned PDF is removed. Hidden text
+includes text an editor "deleted" by clipping it out of view, which copy-paste and ATS parsers
+still read.
+
+With `--mode ats` the file is cleaned as in basic mode, then each page's text is rebuilt so that
+copy-paste and applicant tracking systems read it top to bottom. The page looks the same, but
+its text is drawn as shapes under an invisible copy of the exact visible text. Use it for a CV
+whose copy-paste comes out in the wrong order. The text can no longer be edited, so edit the
+source document and run it again.
 
 ```bash
 uv run python -m pdf_editor sanitize <input_pdf> -o <output_pdf>
@@ -190,7 +198,7 @@ uv run python -m pdf_editor sanitize <input_pdf> -o <output_pdf>
 **Arguments:**
 - **input_pdf**: Path to the input PDF
 - **-o, --output**: Path for the output PDF (default: `sanitized.pdf`)
-- **-m, --mode**: `ocr` (default) or `basic`
+- **-m, --mode**: `ocr` (default), `basic` or `ats`
 - **-l, --lang**: Tesseract languages joined by `+`, ocr mode only (default: `eng+heb`)
 - **--dpi**: Resolution to rasterize pages at, ocr mode only (default: 300)
 
@@ -198,6 +206,7 @@ uv run python -m pdf_editor sanitize <input_pdf> -o <output_pdf>
 ```bash
 uv run python -m pdf_editor sanitize document.pdf -o clean.pdf --lang eng
 uv run python -m pdf_editor sanitize document.pdf -o clean.pdf --mode basic
+uv run python -m pdf_editor sanitize cv.pdf -o cv-clean.pdf --mode ats
 ```
 
 **ocr mode requires Tesseract** with the requested language data. Install it with
@@ -256,7 +265,7 @@ The web app provides a tabbed interface:
 - **Reorder**: Upload a PDF, specify the number of pages and new order
 - **PDF to DOCX**: Upload a PDF and convert it to DOCX, with a right-to-left mode selector
 - **DOCX to PDF**: Upload a Word document and convert it to PDF
-- **Sanitize**: Upload a PDF and either rebuild it from page images with OCR or strip its metadata, annotations and hidden text
+- **Sanitize**: Upload a PDF and either rebuild it from page images with OCR, strip its metadata, annotations and hidden text, or also rebuild its text in reading order for applicant tracking systems
 
 All operations are non-destructive; original files are never modified.
 
@@ -271,7 +280,7 @@ If you prefer to automate web requests, all operations are available as POST end
 | `POST /api/order` | `file` (PDF), `num_pages` (int), `new_order` (str: "1,3,2") | PDF |
 | `POST /api/convert` | `file` (PDF), `rtl` (str: `auto`/`on`/`off`, default `auto`) | DOCX |
 | `POST /api/docx2pdf` | `file` (DOCX) | PDF |
-| `POST /api/sanitize` | `file` (PDF), `mode` (str: `ocr`/`basic`, default `ocr`), `lang` (str, default `eng+heb`) | PDF |
+| `POST /api/sanitize` | `file` (PDF), `mode` (str: `ocr`/`basic`/`ats`, default `ocr`), `lang` (str, default `eng+heb`) | PDF |
 
 **Example (using curl):**
 ```bash
@@ -429,7 +438,9 @@ Frontend tests use Vitest + React Testing Library and cover the App component, F
 - ocr mode requires Tesseract on the server; without it the operation returns a clear error
 - basic mode needs nothing extra and keeps the original text, but does not catch white text or
   text hidden under images
-- The output is image-based: text is searchable and selectable, not editable, and the file is
+- ats mode needs nothing extra either; its output looks like the original, but the text is
+  drawn as shapes under an invisible text layer and can no longer be edited
+- ocr output is image-based: text is searchable and selectable, not editable, and the file is
   usually larger than the original
 - OCR takes a few seconds per page; lower `--dpi` trades accuracy for speed
 

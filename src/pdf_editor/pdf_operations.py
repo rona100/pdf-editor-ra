@@ -12,9 +12,11 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from collections import Counter
 from pathlib import Path
 
 from .docx_rtl import apply_rtl
+from .page_text import add_glyphless_font, rebuild_text_layer, remove_hidden_text
 from .rtl import build_line_corrections, normalize, pdf_has_rtl, reorder_line
 
 logger = logging.getLogger(__name__)
@@ -495,7 +497,7 @@ def _find_soffice() -> str:
         "SOFFICE_BIN to the binary's path."
     )
 
-SANITIZE_MODES = ('ocr', 'basic')
+SANITIZE_MODES = ('ocr', 'basic', 'ats')
 SANITIZE_DEFAULT_LANG = 'eng+heb'
 
 # Every key a PDF info dictionary commonly carries. Blanking them also
@@ -598,39 +600,20 @@ def scrub_pdf(input_path: str, output_path: str) -> None:
     """
     Strips hidden data from a PDF while keeping its real text and fonts.
 
-    Removes the info dictionary and XMP metadata, invisible text, JavaScript,
-    attached and embedded files, links, thumbnails, annotations and form
-    fields, then rewrites the file without unreferenced objects or earlier
-    revisions. Unlike `sanitize_pdf` nothing is rasterized, so it is fast and
-    lossless, but anything hidden by other means (white text, text under
-    images, off-page content) survives.
+    Removes the info dictionary and XMP metadata, hidden text (invisible,
+    transparent, in a hidden layer, clipped away or off the page),
+    JavaScript, attached and embedded files, links, thumbnails, annotations
+    and form fields, then rewrites the file without unreferenced objects or
+    earlier revisions. Unlike `sanitize_pdf` nothing is rasterized, so it is
+    fast and lossless, but text that is drawn yet obscured (white on white,
+    or covered by an image or shape) survives.
 
     Args:
         input_path (str): Path to the input PDF file
         output_path (str): Path to save the scrubbed PDF file
     """
-    try:
-        document = fitz.open(input_path)
-    except Exception as e:
-        raise ValueError(f"'{input_path}' could not be opened as a PDF: {e}")
-
-    with document:
-        if document.needs_pass:
-            raise ValueError(f"'{input_path}' is password-protected")
-
-        # scrub()'s own hidden_text pass matches content-stream lines, but
-        # clean_contents() in current MuPDF writes the whole stream on one
-        # line, so invisible text slips through. Redact it ourselves.
-        for page in document:
-            _remove_invisible_text(page)
-        document.scrub(hidden_text=False)
-
-        for page in document:
-            for widget in list(page.widgets()):
-                page.delete_widget(widget)
-            while page.first_annot:
-                page.delete_annot(page.first_annot)
-
+    with _open_for_scrubbing(input_path) as document:
+        _scrub(document)
         # A full rewrite with garbage collection drops the objects scrubbing
         # orphaned, along with any earlier incremental-update revisions.
         document.save(output_path, garbage=4, deflate=True, clean=True)
@@ -638,20 +621,77 @@ def scrub_pdf(input_path: str, output_path: str) -> None:
     print(f"Successfully scrubbed '{input_path}' and saved as '{output_path}'")
 
 
-def _remove_invisible_text(page) -> None:
-    """Deletes text drawn invisibly (render mode 3 or fully transparent)."""
-    hidden = [
-        span['bbox'] for span in page.get_texttrace()
-        if span['type'] == 3 or span['opacity'] == 0
-    ]
-    if not hidden:
-        return
+def ats_pdf(input_path: str, output_path: str) -> None:
+    """
+    Scrubs a PDF, then rebuilds its text so extraction reads it in order.
 
-    for bbox in hidden:
-        page.add_redact_annot(fitz.Rect(bbox), fill=False)
-    # Text only: images and vector graphics under the hidden text stay intact.
-    page.apply_redactions(
-        images=fitz.PDF_REDACT_IMAGE_NONE,
-        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-        text=fitz.PDF_REDACT_TEXT_REMOVE,
-    )
+    PDF viewers' copy-paste and many ATS parsers read text in the order the
+    file draws it, which after editing is often not the reading order. This
+    runs `scrub_pdf`'s clean-up, then redraws each page's visible text as
+    vector outlines (so the page looks the same) under an invisible text
+    layer that holds exactly the visible text, line by line, top to bottom.
+
+    The text is no longer editable as text: edit the source and run this
+    again.
+
+    Args:
+        input_path (str): Path to the input PDF file
+        output_path (str): Path to save the rebuilt PDF file
+    """
+    with _open_for_scrubbing(input_path) as document:
+        _scrub(document)
+        scrubbed = document.tobytes(garbage=4, deflate=True)
+
+    # Reopen so the rebuild sees the scrubbed content, not cached pages.
+    with fitz.open('pdf', scrubbed) as document:
+        visible = [_text_characters(page) for page in document]
+        font_xref = add_glyphless_font(document)
+        for page in document:
+            rebuild_text_layer(document, page, font_xref)
+        rebuilt = document.tobytes(garbage=4, deflate=True, clean=True)
+
+    # The text layer must hold exactly the visible text. A dropped or
+    # changed character is the silent loss this mode exists to prevent.
+    with fitz.open('pdf', rebuilt) as document:
+        for page, expected in zip(document, visible):
+            if _text_characters(page) != expected:
+                print(
+                    f"Warning: the rebuilt text on page {page.number + 1} does not match "
+                    f"the visible text exactly; check its copy-paste before relying on it."
+                )
+
+    with open(output_path, 'wb') as output_file:
+        output_file.write(rebuilt)
+
+    print(f"Successfully rebuilt '{input_path}' for ATS parsing and saved as '{output_path}'")
+
+
+def _text_characters(page) -> Counter:
+    return Counter(c for c in page.get_text() if not c.isspace())
+
+
+def _open_for_scrubbing(input_path: str):
+    try:
+        document = fitz.open(input_path)
+    except Exception as e:
+        raise ValueError(f"'{input_path}' could not be opened as a PDF: {e}")
+    if document.needs_pass:
+        document.close()
+        raise ValueError(f"'{input_path}' is password-protected")
+    return document
+
+
+def _scrub(document) -> None:
+    """The clean-up shared by `scrub_pdf` and `ats_pdf`, done in place."""
+    # scrub()'s own hidden_text pass only finds render-mode-3 text, and not
+    # even that in current MuPDF: it matches content-stream lines, but
+    # clean_contents() now writes the whole stream on one line.
+    for page in document:
+        remove_hidden_text(document, page)
+    document.scrub(hidden_text=False)
+
+    for page in document:
+        for widget in list(page.widgets()):
+            page.delete_widget(widget)
+        while page.first_annot:
+            page.delete_annot(page.first_annot)
